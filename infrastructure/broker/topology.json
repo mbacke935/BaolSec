@@ -1,0 +1,49 @@
+{
+  "description": "Flux et consommateurs durables de BaolSec (ADR 0002). Durées en secondes, tailles en octets.",
+  "stream_defaults": {
+    "storage": "file",
+    "retention": "limits",
+    "discard": "old",
+    "duplicate_window": 600,
+    "max_msg_size": 1048576,
+    "num_replicas": 1
+  },
+  "consumer_defaults": {
+    "ack_policy": "explicit",
+    "deliver_policy": "all",
+    "max_deliver": 5,
+    "backoff": [5, 15, 30, 60],
+    "max_ack_pending": 1000
+  },
+  "streams": [
+    {
+      "name": "RAW_EVENTS",
+      "subjects": ["raw-events"],
+      "max_age": 259200,
+      "max_bytes": 21474836480,
+      "consumers": ["normalization", "coverage-raw"]
+    },
+    {
+      "name": "NORMALIZED_EVENTS",
+      "subjects": ["normalized-events"],
+      "max_age": 259200,
+      "max_bytes": 21474836480,
+      "consumers": ["detection", "indexing-events", "coverage-normalized"]
+    },
+    {
+      "name": "ALERTS",
+      "subjects": ["alerts"],
+      "max_age": 2592000,
+      "max_bytes": 2147483648,
+      "consumers": ["incident-builder", "indexing-alerts"]
+    },
+    {
+      "name": "DLQ",
+      "subjects": ["dlq.>"],
+      "max_age": 2592000,
+      "max_bytes": 2147483648,
+      "discard": "new",
+      "consumers": []
+    }
+  ]
+}

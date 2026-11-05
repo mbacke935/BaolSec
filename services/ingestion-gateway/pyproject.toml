@@ -1,12 +1,22 @@
 [project]
-name = "baolsec-http"
+name = "baolsec-ingestion-gateway"
 version = "0.1.0"
 description = "BaolSec — Passerelle d'ingestion"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "baolsec-common[nats]",
+    "fastapi==0.162.0",
+    "uvicorn==0.54.0",
+    "pydantic-settings==2.16.2",
+    "prometheus-client==0.26.0",
+    "psycopg[binary]==3.3.8",
+]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pytest-asyncio", "httpx==0.28.1", "jsonschema", "rfc3339-validator"]
+
+[tool.uv.sources]
+baolsec-common = { path = "../../shared/python-common", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -18,3 +28,4 @@ packages = ["src/gateway"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"

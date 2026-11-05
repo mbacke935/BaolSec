@@ -5,9 +5,18 @@ description = "BaolSec — utilitaires techniques partagés (aucune logique mét
 requires-python = ">=3.12"
 dependencies = []
 
+[project.optional-dependencies]
+nats = ["nats-py==2.16.0"]
+dev = ["pytest", "pytest-asyncio", "jsonschema", "rfc3339-validator", "nats-py==2.16.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/baolsec_common"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"

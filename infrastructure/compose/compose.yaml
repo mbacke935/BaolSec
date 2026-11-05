@@ -1,2 +1,76 @@
-# Docker Compose BaolSec — services à déclarer au fil de la réalisation.
-services: {}
+# Docker Compose BaolSec — les services sont ajoutés au fil de la réalisation.
+# Lancer depuis la racine du dépôt : docker compose -f infrastructure/compose/compose.yaml up -d
+
+name: baolsec
+
+services:
+  broker:
+    image: nats:2.15.2-alpine
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    environment:
+      BROKER_TOKEN: ${BROKER_TOKEN:?BROKER_TOKEN manquant dans .env}
+    volumes:
+      - ../broker/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - broker-data:/data
+    ports:
+      - "127.0.0.1:4222:4222"   # développement uniquement : jamais exposé hors de la machine
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks: [internal]
+
+  broker-init:
+    build:
+      context: ../
+      dockerfile: broker/Dockerfile
+    environment:
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+    depends_on:
+      broker:
+        condition: service_healthy
+    restart: "no"
+    networks: [internal]
+
+  ingestion-gateway:
+    build:
+      context: ../..
+      dockerfile: services/ingestion-gateway/Dockerfile
+    environment:
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+      # Référentiel des sources : fichier de développement tant que PostgreSQL n'est pas déployé,
+      # puis GATEWAY_SOURCE_REGISTRY=postgres et GATEWAY_POSTGRES_DSN (compte svc_gateway, lecture seule).
+      GATEWAY_SOURCE_REGISTRY: file
+      GATEWAY_SOURCES_FILE: /run/baolsec/dev/sources.json
+      GATEWAY_SOURCES_REFRESH_S: "5"
+      GATEWAY_TLS_CERT: /run/baolsec/dev/gateway.crt
+      GATEWAY_TLS_KEY: /run/baolsec/dev/gateway.key
+      GATEWAY_SYSLOG_CLIENT_CA: /run/baolsec/dev/sources-ca.crt
+    volumes:
+      - ../tls/dev:/run/baolsec/dev:ro     # créé par scripts/development/init_dev_gateway.sh
+    ports:
+      - "8443:8443"     # HTTPS : agents Fluent Bit
+      - "6514:6514"     # Syslog TLS : relais pfSense
+    depends_on:
+      broker:
+        condition: service_healthy
+      broker-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    networks: [internal]
+
+volumes:
+  broker-data:
+
+networks:
+  internal:
+    name: baolsec-internal

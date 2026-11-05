@@ -1,0 +1,9 @@
+{
+  "description": "Bucket KV de l'état des règles de détection (C3 2.6, ADR 0002). Les tests de charge et de reprise de cet état sont faits en C14.",
+  "bucket": "detection-state",
+  "history": 1,
+  "ttl": 86400,
+  "storage": "file",
+  "max_bytes": 536870912,
+  "max_value_size": 262144
+}
