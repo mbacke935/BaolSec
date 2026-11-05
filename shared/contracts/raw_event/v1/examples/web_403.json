@@ -1,0 +1,17 @@
+{
+  "contract": "raw_event/v1",
+  "event_id": "894f13102b789b4dacd1db89721946a3781400f6fa1dda3f300f733014950620",
+  "source": {
+    "id": "c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e74",
+    "type": "http",
+    "ingestion_mode": "direct"
+  },
+  "transport": "https",
+  "received_at": "2026-11-02T10:22:18.020Z",
+  "agent": {
+    "name": "fluent-bit",
+    "read_at": "2026-11-02T10:22:17.510Z"
+  },
+  "payload_format": "text",
+  "payload": "10.0.8.31 - - [02/Nov/2026:10:22:17 +0000] \"GET /download?file=../../../../etc/shadow HTTP/1.1\" 403 162 \"-\" \"curl/8.5.0\""
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baolsec.local/contracts/raw_event/v1/schema.json",
+  "title": "raw_event/v1",
+  "description": "Enveloppe interne publiée par ingestion-gateway dans le flux raw-events. Indépendante d'ECS (ADR 0001).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "raw_event/v1"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{8,128}$",
+      "description": "Identifiant natif fiable de la source, ou empreinte SHA-256 en hexadécimal (64 caractères) calculée par la passerelle (C3 3.1)."
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "linux",
+            "windows",
+            "firewall",
+            "http"
+          ]
+        },
+        "ingestion_mode": {
+          "enum": [
+            "direct",
+            "rejeu"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "ingestion_mode"
+      ]
+    },
+    "transport": {
+      "enum": [
+        "https",
+        "syslog"
+      ]
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Heure de réception par la passerelle (devient baolsec.received_at)."
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "read_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Première lecture par l'agent, si fournie (devient event.created)."
+        }
+      }
+    },
+    "payload_format": {
+      "enum": [
+        "text",
+        "json",
+        "xml"
+      ]
+    },
+    "payload": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 65536,
+      "description": "Événement brut, inchangé."
+    }
+  },
+  "required": [
+    "contract",
+    "event_id",
+    "source",
+    "transport",
+    "received_at",
+    "payload_format",
+    "payload"
+  ]
+}

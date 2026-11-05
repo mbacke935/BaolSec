@@ -1,0 +1,11 @@
+{
+  "contract": "incident_command_result/v1",
+  "command_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  "result": "refusee",
+  "error": {
+    "code": "transition_interdite",
+    "message": "Un incident clos ne peut pas passer à en_cours ; utiliser la commande rouvrir."
+  },
+  "completed_at": "2026-11-02T11:02:40.051Z",
+  "replayed": false
+}

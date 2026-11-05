@@ -1,0 +1,663 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baolsec.local/contracts/normalized_event/v1/schema.json",
+  "title": "normalized_event/v1",
+  "description": "Événement normalisé conforme à ECS 9.5.0, publié par normalization-worker dans normalized-events (ADR 0001, table C5). event.ingested est absent : il est posé par le pipeline d'ingestion OpenSearch.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "@timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ecs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "9.5.0"
+        }
+      },
+      "required": [
+        "version"
+      ]
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{8,128}$",
+          "description": "Identifiant natif fiable de la source, ou empreinte SHA-256 en hexadécimal (64 caractères) calculée par la passerelle (C3 3.1)."
+        },
+        "kind": {
+          "const": "event"
+        },
+        "category": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "api",
+              "authentication",
+              "configuration",
+              "database",
+              "driver",
+              "email",
+              "file",
+              "host",
+              "iam",
+              "intrusion_detection",
+              "library",
+              "malware",
+              "network",
+              "package",
+              "process",
+              "registry",
+              "session",
+              "threat",
+              "vulnerability",
+              "web"
+            ]
+          }
+        },
+        "type": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "access",
+              "admin",
+              "allowed",
+              "change",
+              "connection",
+              "creation",
+              "deletion",
+              "denied",
+              "end",
+              "error",
+              "group",
+              "indicator",
+              "info",
+              "installation",
+              "protocol",
+              "start",
+              "user"
+            ]
+          }
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "unknown"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataset": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "severity": {
+          "type": "integer",
+          "description": "Sévérité native, seulement si la source a sa propre échelle numérique."
+        },
+        "original": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "category",
+        "type",
+        "action",
+        "outcome",
+        "dataset",
+        "original"
+      ]
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ip": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "anyOf": [
+              {
+                "format": "ipv4"
+              },
+              {
+                "format": "ipv6"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "type": "string",
+          "anyOf": [
+            {
+              "format": "ipv4"
+            },
+            {
+              "format": "ipv6"
+            }
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      }
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "type": "string",
+          "anyOf": [
+            {
+              "format": "ipv4"
+            },
+            {
+              "format": "ipv6"
+            }
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transport": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+$"
+        },
+        "direction": {
+          "enum": [
+            "ingress",
+            "egress",
+            "inbound",
+            "outbound",
+            "internal",
+            "external",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "observer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vendor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "product": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "executable": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command_line": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status_code": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            }
+          }
+        }
+      }
+    },
+    "url": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "original": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "user_agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "original": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "minLength": 1
+        },
+        "syslog": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "severity": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 7
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "related": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "anyOf": [
+              {
+                "format": "ipv4"
+              },
+              {
+                "format": "ipv6"
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
+        "user": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baolsec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "const": "normalized_event/v1"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "linux",
+                "windows",
+                "firewall",
+                "http"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ingestion_mode": {
+              "enum": [
+                "direct",
+                "rejeu"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "ingestion_mode"
+          ]
+        },
+        "received_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "timestamp_source": {
+          "enum": [
+            "original",
+            "received"
+          ]
+        },
+        "severity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "score"
+          ],
+          "properties": {
+            "label": {
+              "enum": [
+                "info",
+                "faible",
+                "moyenne",
+                "elevee",
+                "critique"
+              ]
+            },
+            "score": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "info"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "faible"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 1
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "moyenne"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 2
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "elevee"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 3
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "critique"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 4
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "ip_scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "enum": [
+                "private",
+                "public"
+              ]
+            },
+            "destination": {
+              "enum": [
+                "private",
+                "public"
+              ]
+            }
+          }
+        },
+        "windows": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "logon_type": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "required": [
+        "contract",
+        "source",
+        "received_at",
+        "timestamp_source",
+        "severity"
+      ]
+    }
+  },
+  "required": [
+    "@timestamp",
+    "ecs",
+    "event",
+    "baolsec"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "properties": {
+              "category": {
+                "contains": {
+                  "const": "authentication"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "user"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "baolsec": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "type": {
+                    "const": "firewall"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "observer",
+          "source",
+          "destination"
+        ],
+        "not": {
+          "required": [
+            "host"
+          ]
+        }
+      }
+    }
+  ]
+}

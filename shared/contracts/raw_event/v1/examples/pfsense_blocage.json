@@ -1,0 +1,13 @@
+{
+  "contract": "raw_event/v1",
+  "event_id": "86de4684ad840bb2414b900094b821ffe5f1f4be9eb2c85377d6bae63ae14472",
+  "source": {
+    "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d63",
+    "type": "firewall",
+    "ingestion_mode": "direct"
+  },
+  "transport": "syslog",
+  "received_at": "2026-11-02T10:27:56.410Z",
+  "payload_format": "text",
+  "payload": "<134>Nov  2 10:27:56 fw-edge-01 filterlog[3012]: 5,,,1000000103,em0,match,block,out,4,0x0,,64,0,0,DF,6,tcp,60,10.0.2.47,45.33.10.2,49822,443,0,S,1234567890,,64240,,mss"
+}

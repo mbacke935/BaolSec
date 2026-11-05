@@ -1,0 +1,13 @@
+{
+  "contract": "dlq_message/v1",
+  "message_id": "0c5eec5fdf23678a1c9d3b25ba7812d7e4c3fb86cfd3ba32bf9e4d871c22389a",
+  "original_stream": "raw-events",
+  "original_contract": "raw_event/v1",
+  "service": "normalization-worker",
+  "attempts": 5,
+  "reason_code": "parse_error",
+  "reason": "Ligne sshd non reconnue par le parseur linux.auth (aucun motif applicable).",
+  "failed_at": "2026-11-02T10:41:39.004Z",
+  "payload_encoding": "json",
+  "payload": "{\"contract\": \"raw_event/v1\", \"event_id\": \"voir message_id\", \"payload\": \"<38>Nov  2 10:41:07 srv-linux-01 sshd[1842]: \\u0000\\u0000 trame tronquée\"}"
+}

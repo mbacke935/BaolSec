@@ -1,0 +1,73 @@
+{
+  "@timestamp": "2026-11-02T10:40:52Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "bb69b0e623d399b4a3e8002175b22cc3af3664f96569ebc81ea15b18898138ad",
+    "kind": "event",
+    "category": [
+      "authentication"
+    ],
+    "type": [
+      "start"
+    ],
+    "action": "ssh_login",
+    "outcome": "failure",
+    "provider": "sshd",
+    "dataset": "linux.auth",
+    "created": "2026-11-02T10:40:52.640Z",
+    "original": "<38>Nov  2 10:40:52 srv-linux-01 sshd[1842]: Failed password for admin from 10.0.4.23 port 51234 ssh2"
+  },
+  "user": {
+    "name": "admin"
+  },
+  "host": {
+    "name": "srv-linux-01"
+  },
+  "source": {
+    "ip": "10.0.4.23",
+    "port": 51234
+  },
+  "process": {
+    "name": "sshd",
+    "pid": 1842
+  },
+  "log": {
+    "syslog": {
+      "severity": {
+        "code": 6
+      }
+    }
+  },
+  "related": {
+    "ip": [
+      "10.0.4.23"
+    ],
+    "user": [
+      "admin"
+    ],
+    "hosts": [
+      "srv-linux-01"
+    ]
+  },
+  "message": "Échec d'authentification SSH pour admin depuis 10.0.4.23",
+  "baolsec": {
+    "contract": "normalized_event/v1",
+    "source": {
+      "id": "3f1c2a4e-8b7d-4c21-9a55-1e2f3a4b5c61",
+      "type": "linux",
+      "name": "SRV-LINUX-01",
+      "ingestion_mode": "direct"
+    },
+    "received_at": "2026-11-02T10:40:53.120Z",
+    "timestamp_source": "original",
+    "severity": {
+      "label": "info",
+      "score": 0
+    },
+    "ip_scope": {
+      "source": "private"
+    }
+  }
+}

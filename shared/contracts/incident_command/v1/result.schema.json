@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baolsec.local/contracts/incident_command/v1/result.schema.json",
+  "title": "incident_command_result/v1",
+  "description": "Réponse du service incident-builder à une commande.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "incident_command_result/v1"
+    },
+    "command_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "result": {
+      "enum": [
+        "acceptee",
+        "refusee",
+        "en_erreur"
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "cible_introuvable",
+            "transition_interdite",
+            "donnees_invalides",
+            "erreur_interne"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "replayed": {
+      "type": "boolean",
+      "description": "true si la commande avait déjà été traitée (même command_id)."
+    }
+  },
+  "required": [
+    "contract",
+    "command_id",
+    "result",
+    "completed_at",
+    "replayed"
+  ],
+  "if": {
+    "properties": {
+      "result": {
+        "const": "acceptee"
+      }
+    }
+  },
+  "then": {
+    "not": {
+      "required": [
+        "error"
+      ]
+    }
+  },
+  "else": {
+    "required": [
+      "error"
+    ]
+  }
+}

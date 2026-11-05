@@ -1,0 +1,369 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baolsec.local/contracts/alert/v1/schema.json",
+  "title": "alert/v1",
+  "description": "Alerte publiée par detection-worker dans le flux alerts. S'appuie sur les champs ECS pertinents (event.kind = alert, rule.*, entités). Contenu immuable ; l'état de traitement est dans incidents.alert_state (C4).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "@timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Heure de déclenchement."
+    },
+    "ecs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "9.5.0"
+        }
+      },
+      "required": [
+        "version"
+      ]
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "alert_id déterministe : SHA-256 de (règle, clé de regroupement, début de fenêtre)."
+        },
+        "kind": {
+          "const": "alert"
+        },
+        "category": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "api",
+              "authentication",
+              "configuration",
+              "database",
+              "driver",
+              "email",
+              "file",
+              "host",
+              "iam",
+              "intrusion_detection",
+              "library",
+              "malware",
+              "network",
+              "package",
+              "process",
+              "registry",
+              "session",
+              "threat",
+              "vulnerability",
+              "web"
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "category"
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version"
+      ]
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "type": "string",
+          "anyOf": [
+            {
+              "format": "ipv4"
+            },
+            {
+              "format": "ipv6"
+            }
+          ]
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "type": "string",
+          "anyOf": [
+            {
+              "format": "ipv4"
+            },
+            {
+              "format": "ipv6"
+            }
+          ]
+        }
+      }
+    },
+    "related": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "anyOf": [
+              {
+                "format": "ipv4"
+              },
+              {
+                "format": "ipv6"
+              }
+            ]
+          },
+          "uniqueItems": true
+        },
+        "user": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baolsec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract": {
+          "const": "alert/v1"
+        },
+        "severity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "label",
+            "score"
+          ],
+          "properties": {
+            "label": {
+              "enum": [
+                "info",
+                "faible",
+                "moyenne",
+                "elevee",
+                "critique"
+              ]
+            },
+            "score": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "info"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "faible"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 1
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "moyenne"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 2
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "elevee"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 3
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "label": {
+                    "const": "critique"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "score": {
+                    "const": 4
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "alert": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "window_start": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "group_key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "event_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:-]{8,128}$",
+                "description": "Identifiant natif fiable de la source, ou empreinte SHA-256 en hexadécimal (64 caractères) calculée par la passerelle (C3 3.1)."
+              }
+            }
+          },
+          "required": [
+            "event_ids"
+          ]
+        }
+      },
+      "required": [
+        "contract",
+        "severity",
+        "alert"
+      ]
+    }
+  },
+  "required": [
+    "@timestamp",
+    "ecs",
+    "event",
+    "rule",
+    "baolsec"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "user"
+      ]
+    },
+    {
+      "required": [
+        "source"
+      ]
+    },
+    {
+      "required": [
+        "host"
+      ]
+    },
+    {
+      "required": [
+        "destination"
+      ]
+    }
+  ]
+}

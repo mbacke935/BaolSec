@@ -1,0 +1,70 @@
+{
+  "@timestamp": "2026-11-02T10:22:17Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "894f13102b789b4dacd1db89721946a3781400f6fa1dda3f300f733014950620",
+    "kind": "event",
+    "category": [
+      "http"
+    ],
+    "type": [
+      "access",
+      "error"
+    ],
+    "action": "http_request",
+    "outcome": "failure",
+    "provider": "nginx",
+    "dataset": "web.access",
+    "created": "2026-11-02T10:22:17.510Z",
+    "original": "10.0.8.31 - - [02/Nov/2026:10:22:17 +0000] \"GET /download?file=../../../../etc/shadow HTTP/1.1\" 403 162 \"-\" \"curl/8.5.0\""
+  },
+  "host": {
+    "name": "web-portal"
+  },
+  "source": {
+    "ip": "10.0.8.31"
+  },
+  "http": {
+    "request": {
+      "method": "GET"
+    },
+    "response": {
+      "status_code": 403
+    }
+  },
+  "url": {
+    "original": "/download?file=../../../../etc/shadow"
+  },
+  "user_agent": {
+    "original": "curl/8.5.0"
+  },
+  "related": {
+    "ip": [
+      "10.0.8.31"
+    ],
+    "hosts": [
+      "web-portal"
+    ]
+  },
+  "message": "GET /download refusé (403) pour 10.0.8.31",
+  "baolsec": {
+    "contract": "normalized_event/v1",
+    "source": {
+      "id": "c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e74",
+      "type": "http",
+      "name": "WEB-PORTAL",
+      "ingestion_mode": "direct"
+    },
+    "received_at": "2026-11-02T10:22:18.020Z",
+    "timestamp_source": "original",
+    "severity": {
+      "label": "faible",
+      "score": 1
+    },
+    "ip_scope": {
+      "source": "private"
+    }
+  }
+}

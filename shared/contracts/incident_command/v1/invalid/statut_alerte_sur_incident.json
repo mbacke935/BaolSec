@@ -1,0 +1,16 @@
+{
+  "contract": "incident_command/v1",
+  "command_id": "6c2a9e41-7b3d-4f85-a1c6-93e0d7b2f514",
+  "command_type": "statut_alerte",
+  "target": {
+    "incident_id": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a81"
+  },
+  "issued_by": {
+    "user_id": "5d6e7f80-91a2-4b3c-8d4e-5f6a7b8c9d05",
+    "username": "a.ndiaye"
+  },
+  "issued_at": "2026-11-02T10:46:30Z",
+  "payload": {
+    "status": "en_cours"
+  }
+}

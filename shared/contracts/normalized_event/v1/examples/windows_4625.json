@@ -1,0 +1,65 @@
+{
+  "@timestamp": "2026-11-02T10:40:52.318Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "PC-WIN-COMPTA:Security:1847263",
+    "kind": "event",
+    "category": [
+      "authentication"
+    ],
+    "type": [
+      "start"
+    ],
+    "action": "logon",
+    "outcome": "failure",
+    "code": "4625",
+    "provider": "Microsoft-Windows-Security-Auditing",
+    "dataset": "windows.security",
+    "original": "{\"EventID\": 4625, \"Computer\": \"PC-WIN-COMPTA\", \"Channel\": \"Security\", \"ProviderName\": \"Microsoft-Windows-Security-Auditing\", \"RecordNumber\": 1847263, \"TimeCreated\": \"2026-11-02T10:40:52.318Z\", \"TargetUserName\": \"admin\", \"IpAddress\": \"10.0.4.23\", \"IpPort\": \"51240\", \"LogonType\": \"3\", \"FailureReason\": \"%%2313\"}"
+  },
+  "user": {
+    "name": "admin"
+  },
+  "host": {
+    "name": "PC-WIN-COMPTA"
+  },
+  "source": {
+    "ip": "10.0.4.23",
+    "port": 51240
+  },
+  "related": {
+    "ip": [
+      "10.0.4.23"
+    ],
+    "user": [
+      "admin"
+    ],
+    "hosts": [
+      "PC-WIN-COMPTA"
+    ]
+  },
+  "message": "Échec d'ouverture de session pour admin depuis 10.0.4.23",
+  "baolsec": {
+    "contract": "normalized_event/v1",
+    "source": {
+      "id": "7a9e0b12-3c4d-4e5f-8a6b-7c8d9e0f1a22",
+      "type": "windows",
+      "name": "PC-WIN-COMPTA",
+      "ingestion_mode": "rejeu"
+    },
+    "received_at": "2026-11-02T10:40:53.870Z",
+    "timestamp_source": "original",
+    "severity": {
+      "label": "faible",
+      "score": 1
+    },
+    "ip_scope": {
+      "source": "private"
+    },
+    "windows": {
+      "logon_type": "3"
+    }
+  }
+}

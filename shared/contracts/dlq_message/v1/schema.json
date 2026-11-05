@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baolsec.local/contracts/dlq_message/v1/schema.json",
+  "title": "dlq_message/v1",
+  "description": "Message publié dans la file de rejet par le service qui abandonne un message après 5 tentatives (C3 3.1). Indépendant d'ECS.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "dlq_message/v1"
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Msg-Id du message d'origine (event_id ou alert_id)."
+    },
+    "original_stream": {
+      "enum": [
+        "raw-events",
+        "normalized-events",
+        "alerts"
+      ]
+    },
+    "original_contract": {
+      "enum": [
+        "raw_event/v1",
+        "normalized_event/v1",
+        "alert/v1"
+      ]
+    },
+    "service": {
+      "enum": [
+        "normalization-worker",
+        "detection-worker",
+        "incident-builder",
+        "indexing-worker",
+        "coverage-worker"
+      ]
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "reason_code": {
+      "enum": [
+        "parse_error",
+        "validation_error",
+        "mapping_error",
+        "index_rejected",
+        "processing_error"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "failed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload_encoding": {
+      "enum": [
+        "json",
+        "text",
+        "base64"
+      ]
+    },
+    "payload": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 131072,
+      "description": "Message d'origine complet."
+    }
+  },
+  "required": [
+    "contract",
+    "message_id",
+    "original_stream",
+    "original_contract",
+    "service",
+    "attempts",
+    "reason_code",
+    "reason",
+    "failed_at",
+    "payload_encoding",
+    "payload"
+  ]
+}

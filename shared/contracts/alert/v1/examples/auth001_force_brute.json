@@ -1,0 +1,57 @@
+{
+  "@timestamp": "2026-11-02T10:40:53.512Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "7d61a72a4722888483429e92a6ab245bc7db0a3044e451f75e19b41f7d77be83",
+    "kind": "alert",
+    "category": [
+      "authentication"
+    ]
+  },
+  "rule": {
+    "id": "AUTH-001",
+    "name": "Force brute sur un compte",
+    "version": "3"
+  },
+  "user": {
+    "name": "admin"
+  },
+  "source": {
+    "ip": "10.0.4.23"
+  },
+  "host": {
+    "name": "PC-WIN-COMPTA"
+  },
+  "related": {
+    "ip": [
+      "10.0.4.23"
+    ],
+    "user": [
+      "admin"
+    ],
+    "hosts": [
+      "PC-WIN-COMPTA"
+    ]
+  },
+  "message": "5 échecs d'authentification en 4 min 50 s pour admin depuis 10.0.4.23",
+  "baolsec": {
+    "contract": "alert/v1",
+    "severity": {
+      "label": "critique",
+      "score": 4
+    },
+    "alert": {
+      "window_start": "2026-11-02T10:36:02Z",
+      "group_key": "admin|10.0.4.23",
+      "event_ids": [
+        "PC-WIN-COMPTA:Security:1847201",
+        "PC-WIN-COMPTA:Security:1847218",
+        "PC-WIN-COMPTA:Security:1847236",
+        "PC-WIN-COMPTA:Security:1847250",
+        "PC-WIN-COMPTA:Security:1847263"
+      ]
+    }
+  }
+}

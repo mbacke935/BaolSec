@@ -1,0 +1,17 @@
+{
+  "contract": "raw_event/v1",
+  "event_id": "bb69b0e623d399b4a3e8002175b22cc3af3664f96569ebc81ea15b18898138ad",
+  "source": {
+    "id": "3f1c2a4e-8b7d-4c21-9a55-1e2f3a4b5c61",
+    "type": "linux",
+    "ingestion_mode": "direct"
+  },
+  "transport": "https",
+  "received_at": "2026-11-02T10:40:53.120Z",
+  "agent": {
+    "name": "fluent-bit",
+    "read_at": "2026-11-02T10:40:52.640Z"
+  },
+  "payload_format": "text",
+  "payload": "<38>Nov  2 10:40:52 srv-linux-01 sshd[1842]: Failed password for admin from 10.0.4.23 port 51234 ssh2"
+}

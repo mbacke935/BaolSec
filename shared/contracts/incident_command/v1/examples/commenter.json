@@ -1,0 +1,16 @@
+{
+  "contract": "incident_command/v1",
+  "command_id": "9f4e2d1c-3b5a-4c6d-8e7f-a0b1c2d3e4f5",
+  "command_type": "commenter",
+  "target": {
+    "incident_id": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a81"
+  },
+  "issued_by": {
+    "user_id": "5d6e7f80-91a2-4b3c-8d4e-5f6a7b8c9d05",
+    "username": "a.ndiaye"
+  },
+  "issued_at": "2026-11-02T10:47:05Z",
+  "payload": {
+    "body": "Connexion réussie après les échecs : réinitialiser le mot de passe de admin."
+  }
+}
