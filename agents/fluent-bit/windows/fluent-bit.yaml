@@ -1,0 +1,29 @@
+# Agent BaolSec — poste ou serveur Windows : journal Sécurité.
+# Fluent Bit tourne en service Windows avec le compte LocalSystem (lecture du journal Sécurité).
+# Variables : voir ../agent.env.example ; chemins Windows, par exemple
+#   BAOLSEC_STATE_DIR=C:\ProgramData\BaolSec\agent
+service:
+  flush: 1
+  log_level: info
+  storage.path: ${BAOLSEC_STATE_DIR}/storage
+  storage.sync: full
+  storage.checksum: on
+  storage.backlog.mem_limit: 16M
+  # Nouvel essai après une coupure : délai croissant de 2 s à 30 s au plus
+  scheduler.base: 2
+  scheduler.cap: 30
+
+includes:
+  - ../common/gateway-output.yaml     # « / » fonctionne aussi sous Windows
+
+pipeline:
+  inputs:
+    # Champs produits : EventID, Channel, Computer, EventRecordID, TimeCreated, Message…
+    # La passerelle en tire l'identifiant natif win:<Computer>:<Channel>:<EventRecordID>.
+    - name: winevtlog
+      tag: windows.security
+      channels: Security
+      interval_sec: 1
+      read_existing_events: false
+      db: ${BAOLSEC_STATE_DIR}/winevtlog.db
+      storage.type: filesystem

@@ -77,7 +77,7 @@ def create_app(settings: Settings, cache: SourcesCache, limiter: RateLimiter, pu
         wait = limiter.try_acquire(source.id, len(records))
         if wait > 0:
             metrics.REJECTIONS.labels(T, "rate_limited").inc()
-            retry = "60" if math.isinf(wait) else str(max(1, math.ceil(wait)))
+            retry = str(max(1, math.ceil(wait)))
             return problem(429, "Limite de débit dépassée", f"Source {source.name} : réessayer plus tard.",
                            {"Retry-After": retry})
 

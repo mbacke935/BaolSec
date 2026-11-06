@@ -170,7 +170,7 @@ async def test_source_non_authentifiee_et_tls_obligatoire():
 async def test_message_malforme_et_trop_volumineux():
     async with client() as c:
         bad = await c.post("/ingest", headers=headers(LINUX) | {"Content-Type": "application/json"}, content=b"{oops")
-        big = await c.post("/ingest", headers=headers(LINUX), json=[{"log": "x" * 60000}] * 100)
+        big = await c.post("/ingest", headers=headers(LINUX), json=[{"log": "x" * 60000}] * 150)   # 9 Mo > 8 Mio
     assert bad.status_code == 400 and big.status_code == 413
 
 

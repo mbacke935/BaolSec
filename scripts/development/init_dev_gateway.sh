@@ -11,10 +11,19 @@ DIR=infrastructure/tls/dev
 DAYS=825
 # Clés et jetons de développement : jamais versionnés (ES-08)
 grep -qxF "$DIR/" .gitignore 2>/dev/null || echo "$DIR/" >> .gitignore
+grep -qxF "test-data/runtime/" .gitignore 2>/dev/null || echo "test-data/runtime/" >> .gitignore
+mkdir -p test-data/runtime/agent
 mkdir -p "$DIR"
 cd "$DIR"
 
+# Variables de l'agent de test (C7) : jeton de la source dev-linux
+write_agent_env() {
+  grep '^DEV_TOKEN_LINUX=' tokens.env | sed 's/^DEV_TOKEN_LINUX=/BAOLSEC_SOURCE_TOKEN=/' > agent-test.env
+  chmod 644 agent-test.env   # lu par le conteneur de test ; jeton de développement uniquement
+}
+
 if [[ -f sources-ca.crt && "${1:-}" != "--force" ]]; then
+  [[ -f agent-test.env ]] || { write_agent_env; echo "agent-test.env écrit"; }
   echo "Déjà initialisé ($DIR). Relancer avec --force pour tout régénérer."
   exit 0
 fi
@@ -78,4 +87,5 @@ print("sources.json et tokens.env écrits")
 EOF
 chmod 666 sources.json   # les tests de révocation le modifient
 chmod 600 tokens.env
+write_agent_env
 echo "Environnement de développement prêt dans $DIR"

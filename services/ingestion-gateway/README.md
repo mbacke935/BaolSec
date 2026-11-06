@@ -26,7 +26,7 @@ Pour chaque enregistrement HTTPS :
 | 202 | Lot publié ; `rejected` liste les événements invalides | retire le lot du tampon |
 | 400 | JSON illisible, tableau vide, aucun événement valide | abandonne le lot |
 | 401 | Jeton absent, inconnu, expiré, révoqué, ou source désactivée | abandonne le lot |
-| 413 | Corps > 5 Mio ou plus de 1 000 événements | abandonne le lot : régler la taille des lots de l'agent en dessous (C7) |
+| 413 | Corps > 8 Mio ou plus de 50 000 événements | abandonne le lot. Un morceau Fluent Bit fait au plus ~2 Mo : ces limites ne sont pas atteintes par un agent normal |
 | 429 | Limite de débit de la source dépassée (`Retry-After`) | garde le lot et réessaie |
 | 503 | Broker ou référentiel des sources indisponible (`Retry-After`) | garde le lot et réessaie |
 
@@ -58,9 +58,9 @@ Nouveau jeton (en attendant l'écran d'administration) : `python -m gateway.auth
 | `GATEWAY_SOURCES_REFRESH_S` / `GATEWAY_SOURCES_MAX_STALE_S` | 30 / 300 | cache des sources |
 | `GATEWAY_TLS_CERT`, `GATEWAY_TLS_KEY` | `/run/secrets/gateway.*` | certificat serveur (HTTPS et Syslog) |
 | `GATEWAY_SYSLOG_CLIENT_CA` | `/run/secrets/sources-ca.crt` | AC des certificats clients Syslog |
-| `GATEWAY_MAX_BODY_BYTES` / `GATEWAY_MAX_EVENTS_PER_BATCH` | 5 Mio / 1 000 | taille des lots |
+| `GATEWAY_MAX_BODY_BYTES` / `GATEWAY_MAX_EVENTS_PER_BATCH` | 8 Mio / 50 000 | taille des lots |
 | `GATEWAY_MAX_EVENT_CHARS` | 65 536 | taille d'un événement (limite du contrat) |
-| `GATEWAY_RATE_LIMIT_EVENTS_PER_S` / `GATEWAY_RATE_LIMIT_BURST` | 500 / 5 000 | limite par source et par instance |
+| `GATEWAY_RATE_LIMIT_EVENTS_PER_S` / `GATEWAY_RATE_LIMIT_BURST` | 500 / 5 000 | limite par source et par instance ; un lot plus grand que la rafale est accepté s'il reste des jetons, puis la source attend (429) que la dette soit remboursée |
 
 ## Supervision
 
@@ -71,6 +71,6 @@ Port interne 9000 : `/health` (broker connecté, cache des sources utilisable) e
 ## Tests
 
 ```bash
-make test-gateway       # unitaires (32) + intégration (11, pile démarrée par make gateway-up)
+make test-gateway       # unitaires (33) + intégration (11, pile démarrée par make gateway-up)
 ```
 Le test du référentiel PostgreSQL s'exécute si `TEST_POSTGRES_DSN` est défini.

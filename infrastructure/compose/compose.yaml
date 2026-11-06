@@ -68,9 +68,55 @@ services:
     restart: unless-stopped
     networks: [internal]
 
+  # --- Collecte (C7) : services de test, démarrés avec le profil « agents-test » -------------
+  agent-test:
+    profiles: ["agents-test"]
+    image: fluent/fluent-bit:5.1.5
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/agents/test/fluent-bit-test.yaml"]
+    env_file: ../tls/dev/agent-test.env          # créé par scripts/development/init_dev_gateway.sh
+    environment:
+      BAOLSEC_GATEWAY_HOST: ingestion-gateway
+      BAOLSEC_GATEWAY_PORT: "8443"
+      BAOLSEC_CA_FILE: /run/baolsec/dev/sources-ca.crt
+      BAOLSEC_STATE_DIR: /var/lib/baolsec-agent
+      BAOLSEC_BUFFER_LIMIT: 256M
+      BAOLSEC_TEST_LOG: /logs/auth-test.log
+    volumes:
+      - ../../agents/fluent-bit:/agents:ro
+      - ../tls/dev:/run/baolsec/dev:ro
+      - ../../test-data/runtime/agent:/logs:ro
+      - agent-test-state:/var/lib/baolsec-agent
+    depends_on:
+      ingestion-gateway:
+        condition: service_healthy
+    networks: [internal]
+
+  syslog-relay:
+    profiles: ["agents-test"]
+    build: ../../agents/syslog-relay
+    environment:
+      BAOLSEC_GATEWAY_HOST: ingestion-gateway
+    volumes:
+      - ../tls/dev/sources-ca.crt:/etc/baolsec-relay/sources-ca.crt:ro
+      - ../tls/dev/syslog-relay.crt:/etc/baolsec-relay/syslog-relay.crt:ro
+      - ../tls/dev/syslog-relay.key:/etc/baolsec-relay/syslog-relay.key:ro
+      - relay-spool:/var/spool/baolsec-relay
+    ports:
+      - "127.0.0.1:5514:514/udp"     # tests : simule pfSense
+    depends_on:
+      ingestion-gateway:
+        condition: service_healthy
+    # Deux réseaux : « sources » côté pfSense, « internal » vers la passerelle. Le test de coupure
+    # ne débranche que « internal » : le relais continue de recevoir et met les messages en file.
+    networks: [sources, internal]
+
 volumes:
   broker-data:
+  agent-test-state:
+  relay-spool:
 
 networks:
   internal:
     name: baolsec-internal
+  sources:
+    name: baolsec-sources

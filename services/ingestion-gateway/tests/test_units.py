@@ -86,12 +86,21 @@ def test_jetons():
 def test_seau_a_jetons():
     now = [0.0]
     rl = RateLimiter(rate_per_s=10, burst=20, clock=lambda: now[0])
-    assert rl.try_acquire("s", 20) == 0
-    assert rl.try_acquire("s", 5) == 0.5            # 5 jetons manquants à 10/s
-    now[0] = 0.5
-    assert rl.try_acquire("s", 5) == 0
+    assert rl.try_acquire("s", 15) == 0              # 5 jetons restants
+    assert rl.try_acquire("s", 15) == 0              # accepté : dette de 10
+    assert rl.try_acquire("s", 1) == 1.0             # attendre que la dette soit remboursée (10 à 10/s)
+    now[0] = 1.05
+    assert rl.try_acquire("s", 1) == 0
     assert rl.try_acquire("autre", 20) == 0          # compteurs séparés par source
-    assert rl.try_acquire("s", 21) == float("inf")   # lot plus grand que la rafale
+
+
+def test_lot_plus_grand_que_la_rafale_jamais_bloque():
+    now = [0.0]
+    rl = RateLimiter(rate_per_s=100, burst=50, clock=lambda: now[0])
+    assert rl.try_acquire("s", 5000) == 0            # un gros chunk passe…
+    assert rl.try_acquire("s", 10) == 49.5           # …puis la source attend (débit moyen respecté)
+    now[0] = 50
+    assert rl.try_acquire("s", 10) == 0
 
 
 # ------------------------------------------------------------------ cache des sources

@@ -1,0 +1,25 @@
+# Sortie commune à tous les agents BaolSec : HTTPS vers la passerelle d'ingestion (C6).
+#
+# Comportement de la sortie http de Fluent Bit (vérifié dans plugins/out_http/http.c) :
+#   2xx      -> lot retiré du tampon
+#   408, 429, 5xx, erreur réseau -> le lot reste dans le tampon et sera renvoyé
+#   autres 4xx (400, 401, 413)   -> lot abandonné (jeton invalide, lot illisible)
+# retry_limit: no_limits : on réessaie tant que le tampon disque a de la place.
+pipeline:
+  outputs:
+    - name: http
+      match: "*"
+      host: ${BAOLSEC_GATEWAY_HOST}
+      port: ${BAOLSEC_GATEWAY_PORT}
+      uri: /ingest
+      format: json
+      json_date_key: date
+      json_date_format: iso8601
+      header: Authorization Bearer ${BAOLSEC_SOURCE_TOKEN}
+      tls: on
+      tls.verify: on
+      tls.ca_file: ${BAOLSEC_CA_FILE}
+      retry_limit: no_limits
+      # Taille maximale du tampon disque de cette sortie : au-delà, les plus anciens morceaux
+      # sont supprimés. C'est la limite de capacité mentionnée par le critère de la carte C7.
+      storage.total_limit_size: ${BAOLSEC_BUFFER_LIMIT}

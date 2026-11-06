@@ -1,0 +1,40 @@
+# Agent BaolSec — serveur Linux sans /var/log/auth.log (journald seul : Fedora, RHEL, Debian minimal…).
+# Variables : voir ../agent.env.example
+service:
+  flush: 1
+  log_level: info
+  storage.path: ${BAOLSEC_STATE_DIR}/storage
+  storage.sync: full
+  storage.checksum: on
+  storage.backlog.mem_limit: 16M
+  # Nouvel essai après une coupure : délai croissant de 2 s à 30 s au plus
+  scheduler.base: 2
+  scheduler.cap: 30
+
+includes:
+  - ../common/gateway-output.yaml
+
+pipeline:
+  inputs:
+    # Authentification : messages de sshd, sudo, su et des services d'authentification
+    - name: systemd
+      tag: linux.auth
+      systemd_filter_type: or
+      systemd_filter:
+        - SYSLOG_FACILITY=4
+        - SYSLOG_FACILITY=10
+      db: ${BAOLSEC_STATE_DIR}/journald-auth.db
+      read_from_tail: on
+      storage.type: filesystem
+
+    - name: systemd
+      tag: linux.firewall
+      systemd_filter: _TRANSPORT=kernel
+      db: ${BAOLSEC_STATE_DIR}/journald-kernel.db
+      read_from_tail: on
+      storage.type: filesystem
+
+  filters:
+    - name: grep
+      match: linux.firewall
+      regex: MESSAGE SRC=\S+ DST=\S+

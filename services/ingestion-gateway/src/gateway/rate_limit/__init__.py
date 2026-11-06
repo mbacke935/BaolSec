@@ -7,7 +7,6 @@ source qui s'emballe ; elle n'est pas un quota contractuel.
 from __future__ import annotations
 
 import asyncio
-import math
 import time
 from dataclasses import dataclass
 
@@ -36,14 +35,18 @@ class RateLimiter:
         return b
 
     def try_acquire(self, key: str, n: int) -> float:
-        """Prend n jetons et renvoie 0, ou ne prend rien et renvoie l'attente conseillée (s)."""
+        """Accepte n événements s'il reste des jetons, quitte à passer en négatif (dette) ;
+        sinon ne prend rien et renvoie l'attente conseillée (s).
+
+        La dette permet d'accepter un lot plus grand que la rafale (un chunk Fluent Bit peut
+        contenir des milliers de lignes courtes) sans jamais le refuser définitivement : la
+        source attend ensuite que la dette soit remboursée. Le débit moyen reste borné par `rate`.
+        """
         b = self._bucket(key)
-        if n <= b.tokens:
+        if b.tokens > 0:
             b.tokens -= n
             return 0.0
-        if n > self.burst:
-            return math.inf
-        return (n - b.tokens) / self.rate
+        return max(-b.tokens / self.rate, 1 / self.rate)
 
     async def acquire(self, key: str, n: int = 1) -> None:
         """Attend que n jetons soient disponibles (Syslog : on ralentit la lecture au lieu de rejeter)."""

@@ -104,7 +104,7 @@ async def test_lot_trop_volumineux_413(make_client):
 
 
 async def test_surcharge_429(make_client, broker):
-    async with make_client(rate=1, burst=5) as c:
+    async with make_client(rate=1, burst=2) as c:
         ok = await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
         r = await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
         other = await c.post("/ingest", json=[{"log": "autre source"}], headers=auth(WINDOWS_TOKEN))

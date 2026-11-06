@@ -1,0 +1,42 @@
+# Agent BaolSec — serveur Linux avec rsyslog (Debian, Ubuntu…) : /var/log/auth.log existe.
+# Sans /var/log/auth.log (journald seul), utiliser fluent-bit-journald.yaml.
+# Variables : voir ../agent.env.example
+service:
+  flush: 1
+  log_level: info
+  storage.path: ${BAOLSEC_STATE_DIR}/storage
+  storage.sync: full
+  storage.checksum: on
+  storage.backlog.mem_limit: 16M
+  # Nouvel essai après une coupure : délai croissant de 2 s à 30 s au plus
+  scheduler.base: 2
+  scheduler.cap: 30
+
+includes:
+  - ../common/gateway-output.yaml
+
+pipeline:
+  inputs:
+    # Authentification : sshd, sudo, su, PAM (lignes brutes, parsées par la normalisation)
+    - name: tail
+      tag: linux.auth
+      path: /var/log/auth.log
+      db: ${BAOLSEC_STATE_DIR}/tail-auth.db
+      db.locking: true
+      skip_long_lines: on
+      buffer_max_size: 64k
+      storage.type: filesystem
+
+    # Pare-feu iptables / nftables : la cible LOG écrit dans le journal du noyau, lu ici dans journald
+    - name: systemd
+      tag: linux.firewall
+      systemd_filter: _TRANSPORT=kernel
+      db: ${BAOLSEC_STATE_DIR}/journald-kernel.db
+      read_from_tail: on
+      storage.type: filesystem
+
+  filters:
+    # Ne garder du noyau que les lignes de pare-feu (format de la cible LOG : SRC=… DST=…)
+    - name: grep
+      match: linux.firewall
+      regex: MESSAGE SRC=\S+ DST=\S+

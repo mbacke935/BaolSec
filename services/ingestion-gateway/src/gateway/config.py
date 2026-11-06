@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     http_port: int = 8443
     tls_cert: Path = Path("/run/secrets/gateway.crt")
     tls_key: Path = Path("/run/secrets/gateway.key")
-    max_body_bytes: int = 5 * 1024 * 1024
-    max_events_per_batch: int = 1000
+    # Un chunk Fluent Bit fait au plus ~2 Mo en msgpack ; converti en JSON il grossit : marge à 8 Mio.
+    max_body_bytes: int = 8 * 1024 * 1024
+    max_events_per_batch: int = 50000
 
     # Syslog TCP/TLS (RFC 5425) — certificat client obligatoire
     syslog_enabled: bool = True

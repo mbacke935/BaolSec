@@ -1,0 +1,24 @@
+# Agent de test (tests d'intégration C7, Docker Compose) : même sortie et même tampon disque que
+# les agents réels, mais lecture d'un fichier de test au lieu des journaux du système.
+service:
+  flush: 1
+  log_level: info
+  storage.path: ${BAOLSEC_STATE_DIR}/storage
+  storage.sync: full
+  storage.checksum: on
+  storage.backlog.mem_limit: 16M
+  scheduler.base: 2
+  scheduler.cap: 30
+
+includes:
+  - ../common/gateway-output.yaml
+
+pipeline:
+  inputs:
+    - name: tail
+      tag: test.auth
+      path: ${BAOLSEC_TEST_LOG}
+      db: ${BAOLSEC_STATE_DIR}/tail-test.db
+      db.locking: true
+      refresh_interval: 1
+      storage.type: filesystem

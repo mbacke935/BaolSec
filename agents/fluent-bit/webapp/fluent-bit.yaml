@@ -1,0 +1,39 @@
+# Agent BaolSec — serveur de l'application web et du backend des applications mobiles.
+# Fluent Bit lit les journaux écrits par le serveur (accès HTTP et journaux applicatifs) ;
+# rien n'est collecté sur les téléphones (C1).
+# Variables : voir ../agent.env.example (BAOLSEC_WEBAPP_ACCESS_LOG, BAOLSEC_WEBAPP_APP_LOG)
+service:
+  flush: 1
+  log_level: info
+  storage.path: ${BAOLSEC_STATE_DIR}/storage
+  storage.sync: full
+  storage.checksum: on
+  storage.backlog.mem_limit: 16M
+  # Nouvel essai après une coupure : délai croissant de 2 s à 30 s au plus
+  scheduler.base: 2
+  scheduler.cap: 30
+
+includes:
+  - ../common/gateway-output.yaml
+
+pipeline:
+  inputs:
+    # Journal d'accès du serveur web (nginx, Apache) : une requête par ligne
+    - name: tail
+      tag: web.access
+      path: ${BAOLSEC_WEBAPP_ACCESS_LOG}
+      db: ${BAOLSEC_STATE_DIR}/tail-access.db
+      db.locking: true
+      skip_long_lines: on
+      buffer_max_size: 64k
+      storage.type: filesystem
+
+    # Journal applicatif (connexions, refus d'accès, erreurs) : texte ou JSON, une entrée par ligne
+    - name: tail
+      tag: web.app
+      path: ${BAOLSEC_WEBAPP_APP_LOG}
+      db: ${BAOLSEC_STATE_DIR}/tail-app.db
+      db.locking: true
+      skip_long_lines: on
+      buffer_max_size: 64k
+      storage.type: filesystem
