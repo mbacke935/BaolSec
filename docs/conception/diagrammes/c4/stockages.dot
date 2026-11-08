@@ -1,0 +1,35 @@
+digraph S {
+  graph [rankdir=LR, fontname="DejaVu Sans", labelloc=t, label=<<b>Répartition des données et propriété des écritures</b><br/> >, fontsize=20, dpi=200, nodesep=0.3, ranksep=1.6, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=12];
+  edge [fontname="DejaVu Sans", fontsize=9, color="#37474F"];
+  subgraph cluster_svc { label=<<b>Services</b>>; style="rounded"; color="#90A4AE";
+    node [shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0"];
+    gw [label="1 · Passerelle"]; nm [label="2 · Normalisation"]; dt [label="3 · Détection"]; inc [label="4 · Incidents"];
+    idx [label="5 · Indexation"]; cov [label="6 · Couverture"]; api [label="7 · API REST"];
+  }
+  subgraph cluster_pg { label=<<b>PostgreSQL — une base, quatre schémas</b>>; style="rounded,filled"; fillcolor="#FFF8E1"; color="#F57F17";
+    node [shape=cylinder, style=filled, fillcolor="#FFFFFF", color="#F57F17"];
+    acces [label="acces\nusers · roles · permissions\nsessions · audit_log"];
+    config [label="config\nsources · credentials\nrules · versions · settings"];
+    incs [label="incidents\nalert_state · incidents\ntimeline · comments · commands"];
+    couv [label="couverture\nstate · history · stats\naffected_rules · batches"];
+  }
+  subgraph cluster_os { label=<<b>OpenSearch</b>>; style="rounded,filled"; fillcolor="#FFF3E0"; color="#EF6C00";
+    node [shape=cylinder, style=filled, fillcolor="#FFFFFF", color="#EF6C00"];
+    ev [label="events-AAAA.MM.JJ"]; al [label="alerts-AAAA.MM"];
+  }
+  subgraph cluster_kv { label=<<b>NATS JetStream</b>>; style="rounded,filled"; fillcolor="#E8F5E9"; color="#2E7D32";
+    node [shape=cylinder, style=filled, fillcolor="#FFFFFF", color="#2E7D32"];
+    kv [label="KV detection-state\nfenêtres · alertes en attente"];
+  }
+  api -> acces [penwidth=2]; api -> config [penwidth=2];
+  inc -> incs [penwidth=2]; cov -> couv [penwidth=2];
+  idx -> ev [penwidth=2]; idx -> al [penwidth=2]; dt -> kv [penwidth=2];
+  gw -> config [style=dashed, color="#78909C", label="cache sources"];
+  nm -> config [style=dashed, color="#78909C"];
+  dt -> config [style=dashed, color="#78909C", label="règles"];
+  cov -> config [style=dashed, color="#78909C"];
+  api -> incs [style=dashed, color="#78909C"]; api -> couv [style=dashed, color="#78909C"];
+  api -> ev [style=dashed, color="#78909C"]; api -> al [style=dashed, color="#78909C"];
+  LEG [shape=plain, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="4" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr><tr><td>trait plein, pointe pleine</td><td align="left">écriture par le service propriétaire (un seul écrivain par donnée)</td></tr><tr><td>tirets gris</td><td align="left">lecture seule</td></tr><tr><td>cylindre</td><td align="left">stockage persistant</td></tr></table>>];
+}

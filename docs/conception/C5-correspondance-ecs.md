@@ -14,10 +14,11 @@ Ce document applique l'ADR 0001 (`docs/decisions/0001-schema-commun-ecs.md`). Il
 
 | Champ C4 | Champ normalisé | Type | Renseigné par | Remarque |
 |---|---|---|---|---|
-| event_id | `event.id` | keyword | ingestion-gateway | Identifiant natif fiable ou empreinte SHA-256 (C3 3.1). Conservé tel quel dans toute la chaîne ; `_id` OpenSearch. |
+| event_id | `event.id` | keyword | ingestion-gateway | Identifiant natif fiable (Windows : `win:<Computer>:<Channel>:<EventRecordID>`) ou empreinte SHA-256 de (source, format, contenu brut) (C3 3.1). Conservé tel quel dans toute la chaîne ; `_id` OpenSearch. |
 | source_id | `baolsec.source.id` | keyword (uuid) | ingestion-gateway | Source authentifiée (config.sources). |
 | source_type | `baolsec.source.type` | keyword | ingestion-gateway | `linux`, `windows`, `firewall`, `http`. |
 | — (nom de la source) | `baolsec.source.name` | keyword | normalization-worker (enrichissement) | Copié depuis config.sources. |
+| — (criticité de l'actif) | `baolsec.source.criticality` | keyword | normalization-worker (enrichissement) | `faible`, `moyenne`, `elevee`, `critique` ; copiée depuis config.sources si l'Administrateur l'a renseignée. Distincte de la sévérité de l'événement. |
 | timestamp / original_ts | `@timestamp` | date | normalization-worker | Heure d'origine ; à défaut, heure de réception (voir `baolsec.timestamp_source`). |
 | — | `baolsec.timestamp_source` | keyword | normalization-worker | `original` ou `received`. |
 | received_at | `baolsec.received_at` | date | ingestion-gateway | Heure de réception à la passerelle. |
@@ -29,7 +30,7 @@ Ce document applique l'ADR 0001 (`docs/decisions/0001-schema-commun-ecs.md`). Il
 | severity | `event.severity` / `log.syslog.severity.code` / `log.level` | long / long / keyword | normalization-worker | Sévérité **native** (section 4). |
 | — | `baolsec.severity.label` | keyword | normalization-worker | `info`, `faible`, `moyenne`, `elevee`, `critique`. |
 | — | `baolsec.severity.score` | byte | normalization-worker | 0 (info) à 4 (critique). |
-| user_name | `user.name` | keyword | normalization-worker | Compte concerné par l'événement (section 2). |
+| user_name | `user.name` | keyword | normalization-worker | Compte concerné par l'événement (section 2). Renseigné dès que la source fournit une identité ; absent sinon, sans rendre l'événement invalide. |
 | host_name | `host.name` | keyword | normalization-worker | Machine où l'événement a été enregistré. Pour un pare-feu : `observer.name`. |
 | src_ip | `source.ip` | ip | normalization-worker | |
 | — | `source.port` | long | normalization-worker | Si fourni. |
@@ -128,6 +129,7 @@ Un événement que le parseur reconnaît mais qui n'est pas dans cette table re�
 | `baolsec.source.type` | keyword | `linux`, `windows`, `firewall`, `http`. |
 | `baolsec.source.name` | keyword | Nom de la source. |
 | `baolsec.source.ingestion_mode` | keyword | `direct` ou `rejeu`. |
+| `baolsec.source.criticality` | keyword | Criticité de l'actif : `faible`, `moyenne`, `elevee`, `critique` (facultatif). |
 | `baolsec.received_at` | date | Réception par la passerelle. |
 | `baolsec.timestamp_source` | keyword | `original` ou `received`. |
 | `baolsec.severity.label` | keyword | Sévérité normalisée. |

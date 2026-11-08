@@ -1,0 +1,49 @@
+digraph O {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Structure des index OpenSearch (ECS 9.5.0) et de l'état de détection</b><br/> >, fontsize=20, dpi=200, nodesep=0.5, ranksep=0.9, pad=0.3];
+  node [shape=plain, fontname="DejaVu Sans", fontsize=11];
+  edge [style=dotted, color="#78909C", fontname="DejaVu Sans", fontsize=9];
+  ev [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#EF6C00">
+   <tr><td colspan="2" bgcolor="#FFE0B2"><b>index events-AAAA.MM.JJ</b> (_id = event.id)</td></tr>
+   <tr><td align="left"><u>event.id</u></td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">@timestamp · event.created · event.ingested</td><td align="left"><font color="#546E7A">date</font></td></tr>
+   <tr><td align="left">event.kind · category[] · type[] · action · outcome</td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">event.code · provider · dataset</td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">user.name · host.name</td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">source.ip · destination.ip</td><td align="left"><font color="#546E7A">ip</font></td></tr>
+   <tr><td align="left">source.port · destination.port</td><td align="left"><font color="#546E7A">long</font></td></tr>
+   <tr><td align="left">observer.* · network.* · rule.id</td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">process.* · http.* · url.original · user_agent.original</td><td align="left"><font color="#546E7A">selon ECS</font></td></tr>
+   <tr><td align="left">log.syslog.severity.code · log.level</td><td align="left"><font color="#546E7A">long · keyword</font></td></tr>
+   <tr><td align="left">related.ip · related.user · related.hosts</td><td align="left"><font color="#546E7A">ip[] · keyword[]</font></td></tr>
+   <tr><td align="left">message</td><td align="left"><font color="#546E7A">text</font></td></tr>
+   <tr><td align="left">event.original</td><td align="left"><font color="#546E7A">keyword (non indexé)</font></td></tr>
+   <tr><td align="left">ecs.version</td><td align="left"><font color="#546E7A">keyword (9.5.0)</font></td></tr>
+   <tr><td align="left">baolsec.source.{id, type, name, ingestion_mode}</td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">baolsec.received_at</td><td align="left"><font color="#546E7A">date</font></td></tr>
+   <tr><td align="left">baolsec.severity.{label, score} · ip_scope.*</td><td align="left"><font color="#546E7A">keyword · byte</font></td></tr></table>>];
+  al [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#EF6C00">
+   <tr><td colspan="2" bgcolor="#FFE0B2"><b>index alerts-AAAA.MM</b> (_id = event.id = alert_id)</td></tr>
+   <tr><td align="left"><u>event.id</u> · event.kind = alert · event.category[]</td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">@timestamp (déclenchement) · event.ingested</td><td align="left"><font color="#546E7A">date</font></td></tr>
+   <tr><td align="left">rule.id · rule.name · rule.version</td><td align="left"><font color="#546E7A">keyword</font></td></tr>
+   <tr><td align="left">user.name · host.name · source.ip · destination.ip</td><td align="left"><font color="#546E7A">keyword · ip</font></td></tr>
+   <tr><td align="left">related.* · message · ecs.version</td><td align="left"><font color="#546E7A">keyword · text</font></td></tr>
+   <tr><td align="left">baolsec.severity.{label, score}</td><td align="left"><font color="#546E7A">keyword · byte</font></td></tr>
+   <tr><td align="left">baolsec.alert.window_start · group_key</td><td align="left"><font color="#546E7A">date · keyword</font></td></tr>
+   <tr><td align="left">baolsec.alert.event_ids</td><td align="left"><font color="#546E7A">keyword[]</font></td></tr></table>>];
+  kv [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#2E7D32">
+   <tr><td colspan="2" bgcolor="#C8E6C9"><b>KV detection-state</b> (clé = rule.id.clé_de_regroupement)</td></tr>
+   <tr><td align="left">window_start</td><td align="left"><font color="#546E7A">date</font></td></tr>
+   <tr><td align="left">counted_event_ids (event.id)</td><td align="left"><font color="#546E7A">liste, dans la fenêtre</font></td></tr>
+   <tr><td align="left">pending_alert</td><td align="left"><font color="#546E7A">alert/v1 ou vide</font></td></tr>
+   <tr><td align="left">revision · expiration</td><td align="left"><font color="#546E7A">NATS · fenêtre + 2 min</font></td></tr></table>>];
+  ext_src [label=<<table border="1" cellborder="0" cellpadding="4" color="#90A4AE" style="dashed"><tr><td bgcolor="#ECEFF1"><font color="#546E7A">config.sources</font></td></tr></table>>];
+  ext_rule [label=<<table border="1" cellborder="0" cellpadding="4" color="#90A4AE" style="dashed"><tr><td bgcolor="#ECEFF1"><font color="#546E7A">config.rules</font></td></tr></table>>];
+  ext_as [label=<<table border="1" cellborder="0" cellpadding="4" color="#90A4AE" style="dashed"><tr><td bgcolor="#ECEFF1"><font color="#546E7A">incidents.alert_state</font></td></tr></table>>];
+  al -> ev [label="baolsec.alert.event_ids → event.id (1..n)"];
+  ev -> ext_src [label="baolsec.source.id"];
+  al -> ext_rule [label="rule.id"];
+  ext_as -> al [label="même alert_id"];
+  kv -> al [label="republiée avec le même event.id (C3, W3)"];
+  LEG [shape=plain, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="4" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr><tr><td>pointillés</td><td align="left">référence logique par identifiant, sans clé étrangère</td></tr><tr><td>cadre en tirets</td><td align="left">donnée stockée ailleurs (PostgreSQL)</td></tr><tr><td>_id</td><td align="left">identifiant stable du document : une réindexation remplace, sans doublon</td></tr></table>>];
+}

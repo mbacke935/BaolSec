@@ -1,8 +1,10 @@
 """Point d'entrée HTTPS : POST /ingest (C3 4.3, W1).
 
 Codes de réponse et comportement de Fluent Bit (sortie http, vérifié dans son code source) :
-- 202 : lot accepté ; les événements invalides sont listés dans « rejected » et ne sont pas renvoyés.
-- 400, 401, 413 : l'agent abandonne le lot sans réessayer.
+- 202 : chaque événement du lot a un résultat durable : publié dans raw-events, ou conservé
+  dans la file de rejet (dlq) s'il est invalide ; « rejected » liste ces derniers. Pas
+  d'accusé événement par événement : c'est tout le lot qui est accepté ou renvoyé.
+- 400 (corps illisible), 401, 413 : l'agent abandonne le lot sans réessayer.
 - 429, 503 : l'agent garde le lot dans son tampon et réessaie.
 Les réponses d'erreur suivent RFC 9457 (application/problem+json), comme l'API.
 """
@@ -84,18 +86,17 @@ def create_app(settings: Settings, cache: SourcesCache, limiter: RateLimiter, pu
         # 4. Validation événement par événement
         events, rejected = http_records(records, source, utc_now(), settings.max_event_chars,
                                         agent_name_from(request.headers.get("user-agent")))
-        if rejected:
-            metrics.EVENTS.labels(source.id, T, "rejected").inc(len(rejected))
-        if not events:
-            return problem(400, "Lot invalide", "Aucun événement valide dans le lot.",
-                           rejected=[r.__dict__ for r in rejected])
+        to_dlq = [(source.id, json.dumps(records[r.index], ensure_ascii=False), f"{r.reason} (enregistrement {r.index} du lot)")
+                  for r in rejected]
 
-        # 5. Publication durable, réponse après les PubAck
+        # 5. Résultat durable pour chaque événement (raw-events ou file de rejet), puis réponse
         try:
-            summary = await publisher.publish_all(events)
+            summary = await publisher.publish_all(events, to_dlq)
         except BrokerUnavailable:
             return problem(503, "Service indisponible", "Broker indisponible, renvoyer le lot.",
                            {"Retry-After": "5"})
+        if rejected:
+            metrics.EVENTS.labels(source.id, T, "rejected").inc(len(rejected))
         metrics.EVENTS.labels(source.id, T, "stored").inc(summary.stored)
         metrics.EVENTS.labels(source.id, T, "duplicate").inc(summary.duplicates)
         return JSONResponse(

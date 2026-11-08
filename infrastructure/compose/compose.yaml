@@ -43,7 +43,7 @@ services:
       BROKER_URL: nats://broker:4222
       BROKER_TOKEN: ${BROKER_TOKEN}
       # Référentiel des sources : fichier de développement tant que PostgreSQL n'est pas déployé,
-      # puis GATEWAY_SOURCE_REGISTRY=postgres et GATEWAY_POSTGRES_DSN (compte svc_gateway, lecture seule).
+      # puis GATEWAY_SOURCE_REGISTRY=postgres et GATEWAY_POSTGRES_DSN (compte svc_passerelle, lecture seule).
       GATEWAY_SOURCE_REGISTRY: file
       GATEWAY_SOURCES_FILE: /run/baolsec/dev/sources.json
       GATEWAY_SOURCES_REFRESH_S: "5"
@@ -54,7 +54,7 @@ services:
       - ../tls/dev:/run/baolsec/dev:ro     # créé par scripts/development/init_dev_gateway.sh
     ports:
       - "8443:8443"     # HTTPS : agents Fluent Bit
-      - "6514:6514"     # Syslog TLS : relais pfSense
+      - "6514:6514"     # Syslog TLS : équipements qui émettent directement en TLS
     depends_on:
       broker:
         condition: service_healthy
@@ -91,29 +91,35 @@ services:
         condition: service_healthy
     networks: [internal]
 
-  syslog-relay:
+  syslog-collector:
     profiles: ["agents-test"]
-    build: ../../agents/syslog-relay
+    image: fluent/fluent-bit:5.1.5
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/agents/syslog-collector/fluent-bit.yaml"]
+    env_file: ../tls/dev/collector.env          # jeton de la source dev-pfsense
     environment:
       BAOLSEC_GATEWAY_HOST: ingestion-gateway
+      BAOLSEC_GATEWAY_PORT: "8443"
+      BAOLSEC_CA_FILE: /run/baolsec/dev/sources-ca.crt
+      BAOLSEC_STATE_DIR: /var/lib/baolsec-agent
+      BAOLSEC_BUFFER_LIMIT: 256M
+      BAOLSEC_LISTEN_PORT: "514"
     volumes:
-      - ../tls/dev/sources-ca.crt:/etc/baolsec-relay/sources-ca.crt:ro
-      - ../tls/dev/syslog-relay.crt:/etc/baolsec-relay/syslog-relay.crt:ro
-      - ../tls/dev/syslog-relay.key:/etc/baolsec-relay/syslog-relay.key:ro
-      - relay-spool:/var/spool/baolsec-relay
+      - ../../agents/fluent-bit:/agents:ro
+      - ../tls/dev:/run/baolsec/dev:ro
+      - collector-state:/var/lib/baolsec-agent
     ports:
       - "127.0.0.1:5514:514/udp"     # tests : simule pfSense
     depends_on:
       ingestion-gateway:
         condition: service_healthy
     # Deux réseaux : « sources » côté pfSense, « internal » vers la passerelle. Le test de coupure
-    # ne débranche que « internal » : le relais continue de recevoir et met les messages en file.
+    # ne débranche que « internal » : le collecteur continue de recevoir et garde les messages sur disque.
     networks: [sources, internal]
 
 volumes:
   broker-data:
   agent-test-state:
-  relay-spool:
+  collector-state:
 
 networks:
   internal:

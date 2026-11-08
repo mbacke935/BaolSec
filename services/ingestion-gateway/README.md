@@ -23,8 +23,8 @@ Pour chaque enregistrement HTTPS :
 
 | Code | Cas | Effet chez Fluent Bit |
 |---|---|---|
-| 202 | Lot publié ; `rejected` liste les événements invalides | retire le lot du tampon |
-| 400 | JSON illisible, tableau vide, aucun événement valide | abandonne le lot |
+| 202 | Chaque événement a un résultat durable : publié dans `raw-events`, ou conservé dans la file de rejet (`dlq`) s'il est invalide ; `rejected` liste ces derniers | retire le lot du tampon |
+| 400 | Corps qui n'est pas un tableau JSON lisible | abandonne le lot |
 | 401 | Jeton absent, inconnu, expiré, révoqué, ou source désactivée | abandonne le lot |
 | 413 | Corps > 8 Mio ou plus de 50 000 événements | abandonne le lot. Un morceau Fluent Bit fait au plus ~2 Mo : ces limites ne sont pas atteintes par un agent normal |
 | 429 | Limite de débit de la source dépassée (`Retry-After`) | garde le lot et réessaie |
@@ -33,8 +33,10 @@ Pour chaque enregistrement HTTPS :
 Le comportement de Fluent Bit (abandon sur 4xx sauf 408 et 429, nouvel essai sinon) vient de son code
 source (`plugins/out_http/http.c`). Les erreurs sont au format RFC 9457 (`application/problem+json`).
 
+Il n'y a pas d'accusé événement par événement : c'est tout le lot qui est accepté (202) ou renvoyé (503), avec les mêmes identifiants, et le broker écarte ce qui était déjà stocké.
+
 Syslog n'a pas d'accusé applicatif : si le broker ne répond pas, la passerelle cesse de lire la
-connexion et réessaie ; le relais garde les messages dans sa file persistante.
+connexion et réessaie ; TCP ralentit alors l'émetteur. Cette entrée sert aux équipements qui émettent directement en Syslog TLS ; pfSense passe par le collecteur Fluent Bit (C7).
 
 ## Référentiel des sources
 
@@ -71,6 +73,6 @@ Port interne 9000 : `/health` (broker connecté, cache des sources utilisable) e
 ## Tests
 
 ```bash
-make test-gateway       # unitaires (33) + intégration (11, pile démarrée par make gateway-up)
+make test-gateway       # unitaires (34) + intégration (12, pile démarrée par make gateway-up)
 ```
 Le test du référentiel PostgreSQL s'exécute si `TEST_POSTGRES_DSN` est défini.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prépare l'environnement de développement de la passerelle d'ingestion :
-#   - AC des sources, certificat serveur de la passerelle, certificat client du relais Syslog ;
+#   - AC des sources, certificat serveur de la passerelle, certificat client pour l'entrée Syslog TLS directe ;
 #   - un certificat signé par une autre AC (tests : il doit être refusé) ;
 #   - le référentiel des sources de développement (sources.json) et leurs jetons (tokens.env).
 # Tout est écrit dans infrastructure/tls/dev/ (ignoré par Git). Usage, depuis la racine du dépôt :
@@ -16,14 +16,19 @@ mkdir -p test-data/runtime/agent
 mkdir -p "$DIR"
 cd "$DIR"
 
-# Variables de l'agent de test (C7) : jeton de la source dev-linux
+# Variables des agents de test (C7) : jeton de la source dev-linux (agent) et dev-pfsense (collecteur Syslog)
 write_agent_env() {
   grep '^DEV_TOKEN_LINUX=' tokens.env | sed 's/^DEV_TOKEN_LINUX=/BAOLSEC_SOURCE_TOKEN=/' > agent-test.env
-  chmod 644 agent-test.env   # lu par le conteneur de test ; jeton de développement uniquement
+  grep '^DEV_TOKEN_PFSENSE=' tokens.env | sed 's/^DEV_TOKEN_PFSENSE=/BAOLSEC_SOURCE_TOKEN=/' > collector.env
+  chmod 644 agent-test.env collector.env   # lus par les conteneurs de test ; jetons de développement uniquement
 }
 
 if [[ -f sources-ca.crt && "${1:-}" != "--force" ]]; then
-  [[ -f agent-test.env ]] || { write_agent_env; echo "agent-test.env écrit"; }
+  if ! grep -q '^DEV_TOKEN_PFSENSE=' tokens.env 2>/dev/null; then
+    echo "Fichier tokens.env incomplet (DEV_TOKEN_PFSENSE absent) : relancer avec --force pour le régénérer."
+    exit 1
+  fi
+  [[ -f agent-test.env && -f collector.env ]] || { write_agent_env; echo "agent-test.env et collector.env écrits"; }
   echo "Déjà initialisé ($DIR). Relancer avec --force pour tout régénérer."
   exit 0
 fi
@@ -49,7 +54,7 @@ sign() {  # $1 = nom du fichier, $2 = CN, $3 = extensions
 sign gateway "ingestion-gateway" \
   "subjectAltName=DNS:localhost,DNS:ingestion-gateway,IP:127.0.0.1
 extendedKeyUsage=serverAuth"
-sign syslog-relay "syslog-relay" "extendedKeyUsage=clientAuth"
+sign syslog-client "syslog-client" "extendedKeyUsage=clientAuth"
 
 # Certificat client signé par une AC étrangère : doit être refusé par la passerelle
 openssl req -x509 -newkey rsa:2048 -nodes -days "$DAYS" -subj "$(subj 'rogue')" "${CA_EXT[@]}" \
@@ -68,17 +73,18 @@ def fingerprint(path):
 tokens, sources = {}, []
 for name, stype, var in [("dev-linux", "linux", "DEV_TOKEN_LINUX"),
                          ("dev-windows", "windows", "DEV_TOKEN_WINDOWS"),
-                         ("dev-webapp", "http", "DEV_TOKEN_WEBAPP")]:
+                         ("dev-webapp", "http", "DEV_TOKEN_WEBAPP"),
+                         ("dev-pfsense", "firewall", "DEV_TOKEN_PFSENSE")]:
     token = "bsk_" + secrets.token_urlsafe(32)
     tokens[var] = token
     sources.append({"id": str(uuid.uuid4()), "name": name, "source_type": stype, "transport": "https",
                     "ingestion_mode": "direct", "is_enabled": True,
                     "credentials": [{"credential_type": "token",
                                      "secret_hash": hashlib.sha256(token.encode()).hexdigest()}]})
-sources.append({"id": str(uuid.uuid4()), "name": "dev-pfsense", "source_type": "firewall", "transport": "syslog",
+sources.append({"id": str(uuid.uuid4()), "name": "dev-syslog-direct", "source_type": "firewall", "transport": "syslog",
                 "ingestion_mode": "direct", "is_enabled": True,
                 "credentials": [{"credential_type": "client_cert",
-                                 "cert_fingerprint": fingerprint("syslog-relay.crt")}]})
+                                 "cert_fingerprint": fingerprint("syslog-client.crt")}]})
 with open("sources.json", "w", encoding="utf-8") as f:
     json.dump({"sources": sources}, f, indent=2)
 with open("tokens.env", "w", encoding="utf-8") as f:

@@ -3,12 +3,13 @@
 Critère : après une coupure réseau puis la reconnexion, les événements émis pendant la coupure
 sont reçus, dans la limite du tampon configuré (vérifié par comptage).
 
-Pile : make agents-up (broker, passerelle, agent Fluent Bit de test, relais Syslog). Puis make test-agents.
+Pile : make agents-up (broker, passerelle, agent Fluent Bit de test, collecteur Syslog). Puis make test-agents.
 Variables (valeurs par défaut pour Docker Compose) :
   AGENT_CUT_CMD / AGENT_RESTORE_CMD   coupe / rétablit le réseau de l'agent Fluent Bit
-  RELAY_CUT_CMD / RELAY_RESTORE_CMD   coupe / rétablit le réseau du relais Syslog
+  RELAY_CUT_CMD / RELAY_RESTORE_CMD   coupe / rétablit le réseau du collecteur Syslog
   AGENT_KILL_CMD / AGENT_START_CMD    arrêt brutal / redémarrage de l'agent
-  RELAY_UDP                           adresse d'écoute du relais (défaut localhost:5514)
+  RELAY_UDP                           adresse d'écoute du collecteur (défaut localhost:5514)
+  RELAY_KILL_CMD / RELAY_START_CMD    arrêt brutal / redémarrage du collecteur
 """
 from __future__ import annotations
 
@@ -33,10 +34,16 @@ BROKER_TOKEN = os.environ.get("BROKER_TOKEN")
 NET = "baolsec-internal"
 AGENT_CUT = os.environ.get("AGENT_CUT_CMD", f"docker network disconnect {NET} baolsec-agent-test-1")
 AGENT_RESTORE = os.environ.get("AGENT_RESTORE_CMD", f"docker network connect {NET} baolsec-agent-test-1")
-RELAY_CUT = os.environ.get("RELAY_CUT_CMD", f"docker network disconnect {NET} baolsec-syslog-relay-1")
-RELAY_RESTORE = os.environ.get("RELAY_RESTORE_CMD", f"docker network connect {NET} baolsec-syslog-relay-1")
+RELAY_CUT = os.environ.get("RELAY_CUT_CMD", f"docker network disconnect {NET} baolsec-syslog-collector-1")
+RELAY_RESTORE = os.environ.get("RELAY_RESTORE_CMD", f"docker network connect {NET} baolsec-syslog-collector-1")
 AGENT_KILL = os.environ.get("AGENT_KILL_CMD", "docker kill baolsec-agent-test-1")
 AGENT_START = os.environ.get("AGENT_START_CMD", "docker start baolsec-agent-test-1")
+GATEWAY_STOP = os.environ.get("GATEWAY_STOP_CMD",
+    "docker compose --env-file .env -f infrastructure/compose/compose.yaml stop ingestion-gateway")
+GATEWAY_START = os.environ.get("GATEWAY_START_CMD",
+    "docker compose --env-file .env -f infrastructure/compose/compose.yaml up -d --wait ingestion-gateway")
+RELAY_KILL = os.environ.get("RELAY_KILL_CMD", "docker kill baolsec-syslog-collector-1")
+RELAY_START = os.environ.get("RELAY_START_CMD", "docker start baolsec-syslog-collector-1")
 RELAY_HOST, RELAY_PORT = os.environ.get("RELAY_UDP", "localhost:5514").rsplit(":", 1)
 
 BEFORE, DURING = 50, 200     # événements émis avant puis pendant la coupure
@@ -132,7 +139,7 @@ async def test_agent_arrete_brutalement_pendant_la_coupure():
     assert await count(marker) == 150, "aucun doublon après la reprise"
 
 
-async def test_relais_syslog_coupure_reseau():
+async def test_collecteur_syslog_coupure_reseau():
     marker = f"relay-{uuid.uuid4().hex}"
     send_udp(marker, 0, BEFORE)
     assert await wait_count(marker, BEFORE, 60) == BEFORE, "avant la coupure"
@@ -147,3 +154,33 @@ async def test_relais_syslog_coupure_reseau():
 
     total = await wait_count(marker, BEFORE + DURING, 120)
     assert total == BEFORE + DURING, f"{BEFORE + DURING - total} événement(s) perdu(s)"
+
+
+async def test_collecteur_arrete_brutalement_pendant_la_coupure():
+    """Le collecteur garde sur disque ce qu'il a reçu : un arrêt brutal pendant la coupure ne perd rien."""
+    marker = f"collecteur-kill-{uuid.uuid4().hex}"
+    run(RELAY_CUT)
+    try:
+        send_udp(marker, 0, 100)
+        await asyncio.sleep(5)               # le collecteur a écrit les messages sur disque
+        run(RELAY_KILL)
+        run(RELAY_START)
+        await asyncio.sleep(5)
+    finally:
+        run(RELAY_RESTORE)
+    total = await wait_count(marker, 100, 120)
+    assert total == 100, f"{100 - total} événement(s) perdu(s)"
+
+
+async def test_passerelle_arretee_pendant_l_envoi_syslog():
+    """Le collecteur ne retire un lot de son tampon qu'après l'accusé 202 :
+    un arrêt de la passerelle pendant l'envoi ne perd aucun message."""
+    marker = f"collecteur-gw-{uuid.uuid4().hex}"
+    run(GATEWAY_STOP)
+    try:
+        send_udp(marker, 0, 50)
+        await asyncio.sleep(5)
+    finally:
+        run(GATEWAY_START)
+    total = await wait_count(marker, 50, 180)
+    assert total == 50, f"{50 - total} événement(s) perdu(s)"

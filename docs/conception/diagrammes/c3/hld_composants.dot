@@ -1,0 +1,102 @@
+digraph HLD {
+  graph [rankdir=TB, fontname="DejaVu Sans", nodesep=0.3, ranksep=0.6, splines=spline, newrank=true, compound=true,
+         label=<<b>Diagramme UML des composants — Architecture globale de BaolSec</b>>, labelloc=t, fontsize=16, pad=0.3, dpi=200];
+  node [fontname="DejaVu Sans", fontsize=10, shape=plain];
+  edge [fontname="DejaVu Sans", fontsize=8, color="#37474F", arrowsize=0.7, fontcolor="#263238"];
+
+  subgraph cluster_src { label=<<b>Sources externes supervisées</b>>; style="rounded"; color="#90A4AE"; fontsize=11;
+    LNX [label=<<table border="1" cellborder="0" cellpadding="4" bgcolor="#F5F5F5" color="#607D8B"><tr><td><font point-size="7">«système»</font><br/><b>Serveur / poste Linux</b><br/><font point-size="7">auth.log · journald · iptables</font></td></tr></table>>];
+    WIN [label=<<table border="1" cellborder="0" cellpadding="4" bgcolor="#F5F5F5" color="#607D8B"><tr><td><font point-size="7">«système»</font><br/><b>Poste Windows</b><br/><font point-size="7">journal Sécurité</font></td></tr></table>>];
+    APP [label=<<table border="1" cellborder="0" cellpadding="4" bgcolor="#F5F5F5" color="#607D8B"><tr><td><font point-size="7">«système»</font><br/><b>Application web / API</b><br/><font point-size="7">journaux HTTP · applicatifs</font></td></tr></table>>];
+    MOB [label=<<table border="1" cellborder="0" cellpadding="4" bgcolor="#F5F5F5" color="#607D8B"><tr><td><font point-size="7">«système»</font><br/><b>Application mobile</b><br/><font point-size="7">via son backend (API)</font></td></tr></table>>];
+    FW  [label=<<table border="1" cellborder="0" cellpadding="4" bgcolor="#F5F5F5" color="#607D8B"><tr><td><font point-size="7">«équipement»</font><br/><b>Pare-feu pfSense</b><br/><font point-size="7">Syslog UDP uniquement</font></td></tr></table>>];
+  }
+
+  subgraph cluster_col { label=<<b>Collecte — près des sources (conserver, transmettre, retirer après 202)</b>>; style="rounded"; color="#90A4AE"; fontsize=10;
+    AGL [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#1565C0"><tr><td bgcolor="#E3F2FD"><font point-size="7">«agent»</font><br/><b>Fluent Bit</b><br/><font point-size="7">tail · systemd</font></td></tr><tr><td bgcolor="#FFF3C4"><font point-size="7">tampon disque · objectif 72 h</font></td></tr></table>>];
+    AGW [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#1565C0"><tr><td bgcolor="#E3F2FD"><font point-size="7">«agent»</font><br/><b>Fluent Bit</b><br/><font point-size="7">winevtlog</font></td></tr><tr><td bgcolor="#FFF3C4"><font point-size="7">tampon disque · objectif 72 h</font></td></tr></table>>];
+    AGA [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#1565C0"><tr><td bgcolor="#E3F2FD"><font point-size="7">«agent»</font><br/><b>Fluent Bit</b><br/><font point-size="7">tail</font></td></tr><tr><td bgcolor="#FFF3C4"><font point-size="7">tampon disque · objectif 72 h</font></td></tr></table>>];
+    COL [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="3" color="#1565C0"><tr><td bgcolor="#E3F2FD"><font point-size="7">«agent»</font><br/><b>Collecteur Fluent Bit</b><br/><font point-size="7">entrée Syslog UDP/TCP :514</font></td></tr><tr><td bgcolor="#FFF3C4"><font point-size="7">tampon disque · objectif 72 h</font></td></tr></table>>];
+  }
+
+  subgraph cluster_plat { label=<<b>BaolSec — services logiquement indépendants (prototype : une machine, Docker Compose)</b>>; style="rounded,dashed"; color="#455A64"; fontsize=11;
+
+    GW [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«service» 1</font><br/><b>Passerelle d'ingestion</b><br/><font point-size="7">interfaces fournies : POST /ingest (HTTPS) · Syslog TLS :6514 (secondaire)<br/>authentification · validation · limite de débit · event_id<br/>202 seulement quand chaque événement est publié ou en file de rejet</font></td></tr></table>>];
+
+    BUS [label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="6" color="#2E7D32" bgcolor="#E8F5E9">
+      <tr><td colspan="5" bgcolor="#C8E6C9"><font point-size="7">«broker persistant»</font>  <b>NATS JetStream</b>  <font point-size="7">persistance · accusés de réception · relecture · consommateurs durables</font></td></tr>
+      <tr><td port="raw"><b>raw-events</b><br/><font point-size="7">bruts · supprimés après traitement<br/>refus si plein</font></td><td port="norm"><b>normalized-events</b><br/><font point-size="7">ECS 9.5.0 · 7 j ou 20 Gio</font></td><td port="alt"><b>alerts</b><br/><font point-size="7">alertes</font></td><td port="dlq"><b>dlq</b><br/><font point-size="7">refus à l'ingestion ·<br/>échecs après 5 tentatives</font></td><td port="kv" bgcolor="#FFF8E1"><b>KV detection-state</b><br/><font point-size="7">état des règles</font></td></tr></table>>];
+
+    NOR [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«worker» 2</font><br/><b>Normalisation</b><br/><font point-size="7">parseurs · schéma commun<br/>enrichissement</font></td></tr></table>>];
+    COV [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«service» 6</font><br/><b>Couverture</b><br/><font point-size="7">réception vs traitement<br/>sources silencieuses</font></td></tr></table>>];
+    DET [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«worker» 3</font><br/><b>Détection</b><br/><font point-size="7">règles YAML<br/>fenêtres temporelles</font></td></tr></table>>];
+    IDX [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«worker» 5</font><br/><b>Indexation</b><br/><font point-size="7">écriture par lots<br/>_id déterministe</font></td></tr></table>>];
+    INC [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«service» 4</font><br/><b>Incidents</b><br/><font point-size="7">corrélation · chronologie<br/>justification</font></td></tr></table>>];
+
+    PG [shape=cylinder, style=filled, fillcolor="#FFF8E1", color="#F57F17", fontsize=8.5, margin="0.12,0.08",
+        label="«base relationnelle»\nPostgreSQL\nutilisateurs · rôles · sources · règles (API)\nincidents · chronologies (Incidents)\nétat de couverture (Couverture)"];
+    OS [shape=cylinder, style=filled, fillcolor="#FFF8E1", color="#F57F17", fontsize=8.5, margin="0.12,0.08",
+        label="«moteur de recherche»\nOpenSearch — nœud unique\névénements · alertes\n(seul écrivain : Indexation)"];
+
+    API [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«service» 7</font><br/><b>API REST FastAPI</b><br/><font point-size="7">interface fournie : /api/v1 (HTTPS · JWT · RBAC)<br/>consultation et gestion — aucune ingestion</font></td></tr></table>>];
+    UI  [label=<<table border="1" cellborder="0" cellpadding="5" bgcolor="#E3F2FD" color="#1565C0"><tr><td><font point-size="7">«service» 8 — SPA</font><br/><b>Interface web React</b><br/><font point-size="7">vues Administrateur · Analyste</font></td></tr></table>>];
+
+    subgraph cluster_mon { label=<<b>Supervision technique (transversale)</b>>; style="rounded"; color="#90A4AE"; fontsize=10;
+      PROM [label=<<table border="1" cellborder="0" cellpadding="4" bgcolor="#EDE7F6" color="#5E35B1"><tr><td><b>Prometheus</b><br/><font point-size="7">scrute /metrics</font></td></tr></table>>];
+      GRAF [label=<<table border="1" cellborder="0" cellpadding="4" bgcolor="#EDE7F6" color="#5E35B1"><tr><td><b>Grafana</b><br/><font point-size="7">tableaux de bord</font></td></tr></table>>];
+    }
+  }
+
+  USR [label=<<table border="0" cellpadding="2"><tr><td><font point-size="7">«acteurs»</font></td></tr><tr><td><b>Administrateur · Analyste</b></td></tr></table>>];
+
+  { rank=same; LNX; WIN; APP; MOB; FW; }
+  { rank=same; AGL; AGW; AGA; COL; }
+  { rank=same; NOR; COV; DET; IDX; INC; }
+  { rank=same; PG; OS; }
+  { rank=same; UI; GRAF; }
+
+  LNX -> AGL [color="#90A4AE", fontcolor="#607D8B", label=" lecture locale"]; WIN -> AGW [color="#90A4AE", fontcolor="#607D8B"]; APP -> AGA [color="#90A4AE", fontcolor="#607D8B"]; MOB -> APP [color="#90A4AE", fontcolor="#607D8B", label=" appels API"];
+  FW -> COL [color="#90A4AE", fontcolor="#607D8B", label=" Syslog UDP\n réseau local"];
+  AGL -> GW [label=" HTTPS POST /ingest\n jeton · 202 / 503"]; AGW -> GW; AGA -> GW; COL -> GW [label=" HTTPS POST /ingest"];
+  GW -> PG [style=dashed, label=" lit les sources\n (lecture seule)", constraint=false];
+  GW -> BUS:raw [arrowhead=empty, arrowsize=0.9, label=" publie\n Msg-Id = event_id · attend PubAck", penwidth=1.6];
+  GW -> BUS:dlq [style=dotted, arrowhead=empty, arrowsize=0.9, color="#C62828", fontcolor="#C62828", label=" événement invalide", constraint=false];
+
+  BUS:raw -> NOR [arrowhead=empty, arrowsize=0.9, label=" livre (pull · ack)"];
+  NOR -> BUS:norm [arrowhead=empty, arrowsize=0.9, label=" publie"];
+  BUS:raw -> COV [arrowhead=empty, arrowsize=0.9, label=" livre"];
+  BUS:norm -> COV [arrowhead=empty, arrowsize=0.9];
+  BUS:norm -> DET [arrowhead=empty, arrowsize=0.9, label=" livre"];
+  DET -> BUS:alt [arrowhead=empty, arrowsize=0.9, label=" publie\n Msg-Id = alert_id"];
+  DET -> BUS:kv [dir=both, label=" lit / écrit\n (révision)"];
+  BUS:norm -> IDX [arrowhead=empty, arrowsize=0.9];
+  BUS:alt -> IDX [arrowhead=empty, arrowsize=0.9, label=" livre"];
+  BUS:alt -> INC [arrowhead=empty, arrowsize=0.9, label=" livre"];
+  NOR -> BUS:dlq [style=dotted, arrowhead=empty, arrowsize=0.9, color="#C62828"];
+  IDX -> BUS:dlq [style=dotted, arrowhead=empty, arrowsize=0.9, color="#C62828"];
+  INC -> BUS:dlq [style=dotted, arrowhead=empty, arrowsize=0.9, color="#C62828"];
+
+  COV -> PG [label=" SQL · écrit\n couverture"];
+  INC -> PG [label=" SQL · écrit\n incidents"];
+  IDX -> OS [label=" HTTP _bulk\n seul écrivain", penwidth=1.6];
+  API -> PG [label=" SQL · écrit utilisateurs,\n sources, règles"];
+  API -> OS [style=dashed, label=" HTTP _search\n lecture seule"];
+  API -> INC [label=" commande HTTP interne\n (attend le résultat)", constraint=false];
+  UI -> API [label=" HTTPS REST · JWT"];
+  USR -> UI [color="#90A4AE", fontcolor="#607D8B", label=" navigateur"];
+  GRAF -> PROM [color="#5E35B1", label=" PromQL"];
+  PROM -> BUS [style=dotted, color="#5E35B1", fontcolor="#5E35B1", label=" HTTP /metrics\n (tous les services, NATS, PG, OS)", constraint=false];
+
+  LEG [label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="4" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein, pointe pleine</td><td align="left">appel synchrone : l'émetteur attend la réponse (HTTPS, SQL, HTTP interne)</td></tr>
+    <tr><td>trait plein, pointe creuse</td><td align="left">message asynchrone par le broker : publication ou livraison</td></tr>
+    <tr><td>tirets</td><td align="left">lecture seule</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">mise en file de rejet (dlq)</td></tr>
+    <tr><td><font color="#5E35B1">pointillés violets</font></td><td align="left">collecte des métriques (supervision)</td></tr>
+    <tr><td><font color="#607D8B">trait gris</font></td><td align="left">hors de BaolSec : lecture du journal local, envoi par l'équipement, utilisateur</td></tr>
+    <tr><td bgcolor="#FFF3C4">case jaune · cylindre</td><td align="left">conservation sur disque (tampon des agents, flux, bases)</td></tr>
+  </table>>];
+  OS -> LEG [style=invis]; PG -> LEG [style=invis];
+  PG -> API [style=invis]; OS -> API [style=invis];
+}

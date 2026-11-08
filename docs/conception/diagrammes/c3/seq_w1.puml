@@ -1,0 +1,41 @@
+@startuml seq_w1
+!include _style.iuml
+autonumber
+title W1 — Collecte et ingestion : conserver, transmettre, retirer après accusé
+participant "Source\n(journal local, pfSense)" as S
+participant "Agent ou collecteur\nFluent Bit" as A
+database "Tampon disque\nde l'agent" as B
+participant "Passerelle\nd'ingestion" as G
+queue "raw-events" as N
+queue "dlq" as Q
+
+S -> A : événement (journal lu par l'agent ;\nSyslog UDP reçu par le collecteur)
+A -> B : écrire avant tout envoi
+A -> G : POST /ingest (HTTPS, jeton de la source, lot)
+G -> G : authentifier la source, limiter le débit
+alt jeton inconnu, révoqué ou expiré
+  G --> A : 401 (lot abandonné par Fluent Bit, erreur journalisée)
+else débit dépassé
+  G --> A : 429 + Retry-After
+  note right of A : lot conservé dans le tampon,\nnouvel essai plus tard
+else lot lisible
+  loop pour chaque événement du lot
+    alt événement valide
+      G -> G : event_id = identifiant natif, sinon SHA-256(source, format, contenu)
+      G ->> N : publier (Msg-Id = event_id)
+      N --> G : PubAck (stocké, ou doublon écarté)
+    else événement invalide
+      G ->> Q : publier dlq_message/v1 (motif validation_error)
+      Q --> G : PubAck
+    end
+  end
+  alt chaque événement a un résultat durable
+    G --> A : 202 (liste des événements refusés)
+    A -> B : retirer le lot du tampon
+  else un PubAck manque (broker indisponible, flux plein)
+    G --> A : 503 + Retry-After
+    note right of A : lot conservé et renvoyé entier,\nmêmes event_id : le broker écarte\nce qui était déjà stocké
+  end
+end
+!include _legende_seq.iuml
+@enduml

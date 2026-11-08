@@ -1,7 +1,7 @@
-# Collecte — agents et relais (C7)
+# Collecte — agents et collecteur Syslog (C7)
 
 Uniquement des configurations : aucun agent n'est développé par l'équipe (C3 W1, C1 section 4).
-Les agents envoient en HTTPS à la passerelle (C6), le relais en Syslog TLS.
+Tous les chemins de collecte suivent le même principe : **conserver sur disque, puis transmettre, et ne retirer qu'après l'accusé 202 de la passerelle** (C6).
 
 | Dossier | Source | Transport | Ce qui est collecté |
 |---|---|---|---|
@@ -9,10 +9,10 @@ Les agents envoient en HTTPS à la passerelle (C6), le relais en Syslog TLS.
 | `fluent-bit/linux/fluent-bit-journald.yaml` | serveur Linux sans `auth.log` | HTTPS | journald : facilités auth et authpriv ; pare-feu (noyau) |
 | `fluent-bit/windows/fluent-bit.yaml` | poste ou serveur Windows | HTTPS | journal Sécurité |
 | `fluent-bit/webapp/fluent-bit.yaml` | serveur de l'application web et du backend mobile | HTTPS | journal d'accès HTTP et journal applicatif |
-| `syslog-relay/` | pfSense | Syslog TLS | tout ce que pfSense envoie au relais |
+| `fluent-bit/syslog-collector/fluent-bit.yaml` | pfSense (et tout équipement qui n'émet qu'en Syslog) | Syslog vers le collecteur, puis HTTPS | tout ce que pfSense envoie, transmis inchangé |
 | `fluent-bit/test/` | — | HTTPS | agent des tests d'intégration (fichier de test) |
 
-Versions de référence : Fluent Bit 5.1.5, rsyslog 8.2312 (Ubuntu 24.04).
+Version de référence : Fluent Bit 5.1.5.
 
 ## Principe commun des agents Fluent Bit
 
@@ -64,42 +64,75 @@ avant la règle `DROP`.
 5. Activer l'audit des connexions (stratégie « Auditer les événements de connexion », succès et
    échecs) pour que les événements 4624 et 4625 soient produits.
 
-## Relais Syslog pour pfSense
+## Collecteur Syslog pour pfSense
 
-pfSense n'accueille pas d'agent. Il envoie ses journaux au relais (Statut > Journaux système >
-Paramètres > Journalisation à distance : adresse du relais, port 514). Le relais :
-- garde chaque message dans une **file persistante sur disque** (`queue.type LinkedList`,
-  `queue.saveOnShutdown`, 1 Gio) tant que la passerelle n'a pas reçu le message ;
-- transmet le message **inchangé** (`%rawmsg%`) en **Syslog TLS** (RFC 5425, comptage d'octets),
-  avec son certificat client, et vérifie le nom de la passerelle dans son certificat.
+pfSense n'accueille pas d'agent, et son service de journalisation n'émet **qu'en UDP**
+(documentation Netgate ; TCP et TLS demandent le paquet syslog-ng). Un collecteur Fluent Bit est
+donc placé sur le même réseau local que pfSense :
+
+1. il reçoit les messages (UDP, ou TCP pour un équipement qui sait le faire) sur le port 514 ;
+2. il les écrit dans son tampon disque, **sans les modifier** (ligne reçue dans la clé `log`) ;
+3. il les envoie à la passerelle en HTTPS, avec le jeton de la source pare-feu ;
+4. il ne les retire du tampon qu'après la réponse 202.
+
+Le collecteur utilise donc exactement le même mécanisme que les agents. Dans pfSense : Statut >
+Journaux système > Paramètres > Journalisation à distance, adresse du collecteur, port 514.
 
 ```bash
-docker build -t baolsec-syslog-relay agents/syslog-relay
-docker run -d --name baolsec-syslog-relay -p 514:514/udp -p 514:514/tcp \
-  -e BAOLSEC_GATEWAY_HOST=baolsec.example.local \
-  -v /etc/baolsec-relay:/etc/baolsec-relay:ro -v baolsec-relay-spool:/var/spool/baolsec-relay \
-  baolsec-syslog-relay
+docker run -d --name baolsec-syslog-collector -p 514:514/udp -p 514:514/tcp \
+  --env-file /etc/baolsec-agent/agent.env -e BAOLSEC_LISTEN_PORT=514 \
+  -v $PWD/agents/fluent-bit:/agents:ro -v /etc/baolsec-agent:/etc/baolsec-agent:ro \
+  -v baolsec-collector-state:/var/lib/baolsec-agent \
+  fluent/fluent-bit:5.1.5 /fluent-bit/bin/fluent-bit -c /agents/syslog-collector/fluent-bit.yaml
 ```
 
-### Limites mesurées du chemin Syslog
+La passerelle garde son entrée Syslog TLS (port 6514) pour les équipements qui savent émettre en
+TLS avec un certificat client ; ce n'est pas le chemin de pfSense.
 
-| Situation | Résultat mesuré |
+## Chaîne de conservation et résultats mesurés
+
+| Étape | Qui garde la donnée en attendant | Confirmation |
+|---|---|---|
+| Source → agent | Journal local (fichier, journald, journal Windows) | Position de lecture enregistrée sur disque |
+| pfSense → collecteur | Aucun (UDP sur le réseau local) | Aucune : seule limite restante |
+| Agent ou collecteur → passerelle | Tampon disque Fluent Bit | Réponse 202 ; sinon nouvel essai |
+| Passerelle → broker | La passerelle ne répond qu'après le PubAck de chaque événement | 503 si le broker ne confirme pas |
+
+| Test (make test-agents) | Résultat |
 |---|---|
-| Coupure réseau entre relais et passerelle (paquets perdus), puis rétablissement | aucun message perdu (50 + 200) |
-| Passerelle arrêtée pendant l'envoi | 2 messages perdus sur 20 : les premiers envoyés après l'arrêt |
-| Relais redémarré pendant que la passerelle est arrêtée | file conservée sur disque, rejouée à la reprise |
+| Agent : 50 événements, coupure réseau, 200 pendant la coupure, reconnexion | 250 / 250, sans doublon |
+| Agent arrêté brutalement pendant la coupure | 150 / 150 |
+| Collecteur : même scénario de coupure réseau | 250 / 250 |
+| Collecteur arrêté brutalement pendant la coupure | 100 / 100 |
+| Passerelle arrêtée pendant l'envoi Syslog | 50 / 50 |
 
-La perte à l'arrêt de la passerelle est propre au Syslog sur TCP simple : le protocole n'a pas
-d'accusé applicatif, et un message écrit dans une connexion déjà fermée par l'autre côté est
-perdu avant que l'émetteur ne détecte l'erreur. RELP corrigerait ce point ; il n'est pas pris en
-charge par la passerelle dans cette version (C3 4.3 : « sinon la limite est documentée »).
-Entre pfSense et le relais, le transport est UDP sur le réseau local : le relais doit être placé
-au plus près de pfSense.
+## Objectif de conservation : 72 heures
+
+Objectif de conception : supporter une indisponibilité de la passerelle de **72 heures** (une
+coupure d'un week-end, du vendredi soir au lundi matin) sans perte. C'est une exigence à
+dimensionner et à vérifier, pas une garantie : au-delà de `BAOLSEC_BUFFER_LIMIT`, Fluent Bit
+supprime les morceaux les plus anciens.
+
+- **Dimensionnement**, par source : `BAOLSEC_BUFFER_LIMIT` ≥ débit de pointe (événements/s)
+  × 259 200 s × taille moyenne mesurée (octets) × 1,5 (réserve pour le format de stockage).
+  Exemples : serveur Linux à 2 évt/s de 400 octets ≈ 0,3 Go ; serveur web à 50 évt/s de 500
+  octets ≈ 10 Go. Les débits et tailles réels sont mesurés en C27.
+- **Rattrapage** : pour vider en H heures le retard de 72 heures, le débit d'envoi doit atteindre
+  débit de collecte × (1 + 72/H). La passerelle limite le débit par source
+  (`GATEWAY_RATE_LIMIT_EVENTS_PER_S`) : à régler en conséquence.
+- **Côté broker** : `raw-events` refuse les nouveaux messages quand il est plein au lieu de
+  supprimer ceux qui ne sont pas encore traités ; la passerelle répond alors 503 et les agents
+  gardent leurs événements. Un rattrapage ne peut donc pas provoquer de perte dans le broker.
+- **Prérequis sur les sources** : journald en stockage persistant (`Storage=persistent` dans
+  `/etc/systemd/journald.conf`) ; journal Sécurité de Windows assez grand pour ne pas être écrasé
+  pendant la coupure ; rotation des journaux plus longue que la coupure.
+- **Vérification** : test accéléré (le volume de 72 heures injecté à débit élevé pendant une
+  coupure) avec comptage avant/après, prévu avec les mesures de C27.
 
 ## Tests
 
 ```bash
-make agents-up       # broker, passerelle, agent de test et relais (profil agents-test)
+make agents-up       # broker, passerelle, agent de test et collecteur Syslog (profil agents-test)
 make test-agents     # coupure réseau puis reconnexion, comptage avant/après
-make agents-check    # vérifie la syntaxe de toutes les configurations (Fluent Bit et rsyslog)
+make agents-check    # vérifie la syntaxe de toutes les configurations Fluent Bit
 ```

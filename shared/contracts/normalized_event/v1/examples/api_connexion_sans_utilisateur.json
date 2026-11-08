@@ -1,0 +1,55 @@
+{
+  "@timestamp": "2026-11-02T10:31:04Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "e9ae05322f117889bf21fe7efaa6ca04bb50adf4d37f136731b0690dc48b2662",
+    "kind": "event",
+    "category": [
+      "authentication"
+    ],
+    "type": [
+      "start"
+    ],
+    "action": "api_login",
+    "outcome": "failure",
+    "provider": "portal-api",
+    "dataset": "app.log",
+    "original": "{\"ts\":\"2026-11-02T10:31:04Z\",\"event\":\"login_failed\",\"client_ip\":\"10.0.8.31\",\"reason\":\"invalid_token\"}"
+  },
+  "host": {
+    "name": "web-portal"
+  },
+  "source": {
+    "ip": "10.0.8.31"
+  },
+  "related": {
+    "ip": [
+      "10.0.8.31"
+    ],
+    "hosts": [
+      "web-portal"
+    ]
+  },
+  "message": "Connexion à l'API refusée (jeton invalide) depuis 10.0.8.31",
+  "baolsec": {
+    "contract": "normalized_event/v1",
+    "source": {
+      "id": "c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e74",
+      "type": "http",
+      "name": "WEB-PORTAL",
+      "ingestion_mode": "direct",
+      "criticality": "elevee"
+    },
+    "received_at": "2026-11-02T10:31:04.620Z",
+    "timestamp_source": "original",
+    "severity": {
+      "label": "faible",
+      "score": 1
+    },
+    "ip_scope": {
+      "source": "private"
+    }
+  }
+}

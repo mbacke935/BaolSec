@@ -1,0 +1,75 @@
+@startuml classes_messages
+!include _style.iuml
+title Contrats des messages (C5, shared/contracts)
+hide empty methods
+hide circle
+class "raw_event/v1" as Raw <<raw-events>> {
+  contract : "raw_event/v1"
+  event_id : str
+  source : {id, type, ingestion_mode}
+  transport : https | syslog
+  received_at : datetime
+  agent : {name, read_at}?
+  payload_format : text | json | xml
+  payload : str
+}
+class "normalized_event/v1 (ECS 9.5.0)" as Norm <<normalized-events>> {
+  @timestamp : datetime
+  ecs.version : "9.5.0"
+  event : {id, kind, category[], type[], action,
+           outcome, code?, provider?, dataset,
+           created?, original}
+  user.name ? (si la source fournit l'identité) · host.name ?
+  source : {ip, port}? · destination : {ip, port}?
+  observer.* ? · network.* ? · rule.id ?
+  process.* ? · http.* ? · url.original ?
+  log.syslog.severity.code ? · log.level ?
+  related : {ip[], user[], hosts[]}
+  message
+  baolsec : {contract, source{id, type, name,
+             ingestion_mode, criticality?}, received_at,
+             timestamp_source, severity{label, score},
+             ip_scope?}
+}
+class "alert/v1" as Alert <<alerts>> {
+  @timestamp : datetime
+  ecs.version : "9.5.0"
+  event : {id = alert_id, kind = alert, category[]}
+  rule : {id, name, version}
+  user.name? · source.ip? · host.name? · destination.ip?
+  related · message
+  baolsec : {contract, severity{label, score},
+             alert{window_start, group_key, event_ids[]}}
+}
+class "dlq_message/v1" as Dlq <<dlq>> {
+  contract : "dlq_message/v1"
+  message_id : str
+  original_stream : ingest | raw-events | normalized-events | alerts
+  original_contract · service
+  source_id ? (refus à l'ingestion)
+  attempts : 1..5
+  reason_code · reason
+  failed_at : datetime
+  payload_encoding · payload
+}
+class "incident_command/v1" as Cmd <<HTTP interne>> {
+  contract : "incident_command/v1"
+  command_id : uuid = Idempotency-Key
+  command_type : str
+  target : {incident_id | alert_id}
+  issued_by : {user_id, username}
+  issued_at : datetime
+  payload : selon command_type
+}
+Raw "1" --> "0..1" Norm : normalisé en
+Norm "1..*" --> "0..*" Alert : justifie (event_ids)
+Cmd ..> Alert : statut_alerte, assigner_alerte
+Dlq ..> Raw : rejet d'un message\nou d'un événement reçu invalide
+legend bottom left
+  |= Notation |= Signification |
+  | <<flux>> | flux du broker ou canal qui transporte le contrat |
+  | « ? » | champ facultatif (omis si la source ne fournit pas l'information) |
+  | flèche pleine et multiplicités | relation entre messages (un raw_event donne au plus un événement normalisé) |
+  | tirets | référence par identifiant, sans inclusion du message |
+endlegend
+@enduml

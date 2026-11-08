@@ -1,0 +1,6 @@
+# Le collecteur ne parse pas les messages : il garde la ligne reçue telle quelle (clé log).
+# Ce parseur accepte toute ligne, pour que ni le format BSD (RFC 3164) ni RFC 5424 ne soit rejeté.
+parsers:
+  - name: baolsec-brut
+    format: regex
+    regex: '^(?<message>.*)$'

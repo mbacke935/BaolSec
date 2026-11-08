@@ -1,0 +1,73 @@
+digraph MCD {
+  graph [rankdir=LR, fontname="DejaVu Sans", fontsize=22, labelloc=t, label=<<b>MCD — Entités et associations de BaolSec</b><br/> >, nodesep=0.35, ranksep=1.1, dpi=200, pad=0.3, newrank=true, splines=true];
+  node [shape=plain, fontname="DejaVu Sans", fontsize=12];
+  edge [fontname="DejaVu Sans", fontsize=10, color="#37474F", dir=both, arrowsize=0.9];
+
+  subgraph cluster_acces { label=<<b>Accès</b>>; style="rounded,filled"; fillcolor="#F3F7FC"; color="#90A4AE"; fontsize=14;
+    Role [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>Role</b></td></tr><tr><td align="left">id · name</td></tr></table>>];
+    Permission [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>Permission</b></td></tr><tr><td align="left">id · code</td></tr></table>>];
+    User [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>User</b></td></tr><tr><td align="left">id · username · role_id</td></tr></table>>];
+    UserSession [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>UserSession</b></td></tr><tr><td align="left">id</td></tr></table>>];
+    AuditLog [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>AuditLog</b></td></tr><tr><td align="left">id</td></tr></table>>];
+  }
+  subgraph cluster_conf { label=<<b>Configuration</b>>; style="rounded,filled"; fillcolor="#F3F7FC"; color="#90A4AE"; fontsize=14;
+    Source [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>Source</b></td></tr><tr><td align="left">id · name · source_type</td></tr></table>>];
+    SourceCredential [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>SourceCredential</b></td></tr><tr><td align="left">id</td></tr></table>>];
+    Rule [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>Rule</b></td></tr><tr><td align="left">id · name · severity</td></tr></table>>];
+    RuleVersion [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>RuleVersion</b></td></tr><tr><td align="left">rule_id · version</td></tr></table>>];
+    RuleRequirement [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>RuleRequirement</b></td></tr><tr><td align="left">id · source_type</td></tr></table>>];
+    Setting [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>Setting</b></td></tr><tr><td align="left">key</td></tr></table>>];
+  }
+  subgraph cluster_os { label=<<b>Détection — OpenSearch</b>>; style="rounded,filled"; fillcolor="#FFF8E1"; color="#F57F17"; fontsize=14;
+    Event [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#F57F17"><tr><td bgcolor="#FFE0B2"><b>Event</b></td></tr><tr><td align="left">event_id</td></tr></table>>];
+    Alert [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#F57F17"><tr><td bgcolor="#FFE0B2"><b>Alert</b></td></tr><tr><td align="left">alert_id</td></tr></table>>];
+  }
+  subgraph cluster_inc { label=<<b>Incidents</b>>; style="rounded,filled"; fillcolor="#F3F7FC"; color="#90A4AE"; fontsize=14;
+    AlertState [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>AlertState</b></td></tr><tr><td align="left">alert_id · status</td></tr></table>>];
+    Incident [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>Incident</b></td></tr><tr><td align="left">id · status</td></tr></table>>];
+    IncidentAlert [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>IncidentAlert</b></td></tr><tr><td align="left">incident_id · alert_id</td></tr></table>>];
+    TimelineEntry [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>TimelineEntry</b></td></tr><tr><td align="left">id</td></tr></table>>];
+    IncidentComment [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>IncidentComment</b></td></tr><tr><td align="left">id</td></tr></table>>];
+    IncidentCommand [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>IncidentCommand</b></td></tr><tr><td align="left">command_id</td></tr></table>>];
+  }
+  subgraph cluster_cov { label=<<b>Couverture</b>>; style="rounded,filled"; fillcolor="#F3F7FC"; color="#90A4AE"; fontsize=14;
+    CoverageState [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>CoverageState</b></td></tr><tr><td align="left">source_id · state</td></tr></table>>];
+    CoverageStateHistory [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>CoverageStateHistory</b></td></tr><tr><td align="left">id</td></tr></table>>];
+    CoverageStat [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>CoverageStat</b></td></tr><tr><td align="left">source_id · bucket_start</td></tr></table>>];
+    CoverageAffectedRule [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="4" color="#1F3864"><tr><td bgcolor="#DCE6F2"><b>CoverageAffectedRule</b></td></tr><tr><td align="left">source_id · rule_id</td></tr></table>>];
+  }
+
+  // arrowtail = côté de l'entité source (tail), arrowhead = côté cible
+  // teetee = 1,1 ; teeodot = 0,1 ; crowtee = 1,n ; crowodot = 0,n
+  Role -> User [arrowtail=teetee, arrowhead=crowodot, label="possède\n(1 rôle par utilisateur)"];
+  Role -> Permission [arrowtail=crowodot, arrowhead=crowodot, label="accorde"];
+  User -> UserSession [arrowtail=teetee, arrowhead=crowodot, label="ouvre"];
+  User -> AuditLog [arrowtail=teeodot, arrowhead=crowodot, label="agit"];
+
+  Source -> SourceCredential [arrowtail=teetee, arrowhead=crowtee, label="s'authentifie\n(2 actifs max)"];
+  Rule -> RuleVersion [arrowtail=teetee, arrowhead=crowtee, label="versionnée"];
+  Rule -> RuleRequirement [arrowtail=teetee, arrowhead=crowodot, label="exige"];
+  Source -> RuleRequirement [arrowtail=teeodot, arrowhead=crowodot, label="visée par"];
+
+  Source -> Event [arrowtail=teetee, arrowhead=crowodot, style=dotted, label="émet"];
+  Rule -> Alert [arrowtail=teetee, arrowhead=crowodot, style=dotted, label="déclenche"];
+  Alert -> Event [arrowtail=crowodot, arrowhead=crowtee, style=dotted, label="justifiée par"];
+  Alert -> AlertState [arrowtail=teetee, arrowhead=teetee, style=dotted, label="état de triage"];
+
+  AlertState -> IncidentAlert [arrowtail=teetee, arrowhead=teeodot, label="rattachée\n(1 incident max)"];
+  Incident -> IncidentAlert [arrowtail=teetee, arrowhead=crowtee, label="regroupe"];
+  Incident -> TimelineEntry [arrowtail=teetee, arrowhead=crowodot, label="chronologie"];
+  Incident -> IncidentComment [arrowtail=teetee, arrowhead=crowodot, label="commentaires"];
+  Incident -> IncidentCommand [arrowtail=teetee, arrowhead=crowodot, label="commandes"];
+  User -> Incident [arrowtail=teeodot, arrowhead=crowodot, label="assigné", constraint=false];
+
+  Source -> CoverageState [arrowtail=teetee, arrowhead=teetee, label="état"];
+  Source -> CoverageStateHistory [arrowtail=teetee, arrowhead=crowodot, label="historique"];
+  Source -> CoverageStat [arrowtail=teetee, arrowhead=crowodot, label="volumes"];
+  Source -> CoverageAffectedRule [arrowtail=teetee, arrowhead=crowodot, label="prive"];
+  Rule -> CoverageAffectedRule [arrowtail=teetee, arrowhead=crowodot, label="affectée"];
+
+  {rank=same; Source; Rule;}
+  Setting -> RuleRequirement [style=invis];
+  LEG [shape=plain, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="4" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr><tr><td>trait plein</td><td align="left">association entre entités PostgreSQL (clé étrangère)</td></tr><tr><td>pointillés</td><td align="left">référence logique par identifiant vers OpenSearch, sans clé étrangère</td></tr><tr><td>trait double ‖</td><td align="left">exactement un</td></tr><tr><td>cercle et trait</td><td align="left">zéro ou un</td></tr><tr><td>cercle et patte</td><td align="left">zéro ou plusieurs</td></tr><tr><td>trait et patte</td><td align="left">un ou plusieurs</td></tr></table>>];
+}

@@ -11,7 +11,7 @@ from gateway.http import create_app
 from gateway.publisher import RawEventPublisher
 from gateway.rate_limit import RateLimiter
 
-from .conftest import DISABLED_TOKEN, LINUX_TOKEN, OLD_TOKEN, WINDOWS_TOKEN, assert_raw_event
+from .conftest import DISABLED_TOKEN, LINUX_TOKEN, OLD_TOKEN, WINDOWS_TOKEN, assert_dlq_message, assert_raw_event
 
 
 def settings(**kw) -> Settings:
@@ -39,9 +39,9 @@ async def test_lot_valide_202_apres_publication(make_client, broker):
         r = await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
     assert r.status_code == 202
     assert r.json() == {"accepted": 3, "stored": 3, "duplicates": 0, "rejected": []}
-    assert len(broker.messages) == 3
-    for subject, event in broker.messages:
-        assert subject == "raw-events" and event["transport"] == "https"
+    assert len(broker.on("raw-events")) == 3
+    for event in broker.on("raw-events"):
+        assert event["transport"] == "https"
         assert_raw_event(event)
 
 
@@ -50,7 +50,7 @@ async def test_double_envoi_ecarte_par_le_broker(make_client, broker):
         await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
         r = await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
     assert r.status_code == 202 and r.json()["duplicates"] == 3
-    assert len(broker.messages) == 3
+    assert len(broker.on("raw-events")) == 3
 
 
 async def test_evenement_windows_identifiant_natif(make_client, broker):
@@ -81,19 +81,33 @@ async def test_lot_malforme_400(make_client, body):
     assert r.status_code == 400 and r.json()["status"] == 400
 
 
-async def test_lot_partiellement_invalide(make_client, broker):
+async def test_lot_partiellement_invalide_refus_conserves(make_client, broker):
     async with make_client() as c:
         r = await c.post("/ingest", json=[BATCH[0], "texte", {"log": ""}, BATCH[1]], headers=auth(LINUX_TOKEN))
     assert r.status_code == 202
     body = r.json()
     assert body["accepted"] == 2 and [x["index"] for x in body["rejected"]] == [1, 2]
-    assert len(broker.messages) == 2
+    assert len(broker.on("raw-events")) == 2
+    dlq = broker.on("dlq.ingestion-gateway")
+    assert len(dlq) == 2, "chaque événement refusé est conservé dans la file de rejet"
+    for m in dlq:
+        assert_dlq_message(m)
+        assert m["original_stream"] == "ingest" and m["source_id"] and m["reason_code"] == "validation_error"
 
 
-async def test_lot_entierement_invalide_400(make_client, broker):
+async def test_lot_entierement_invalide_conserve_puis_202(make_client, broker):
     async with make_client() as c:
         r = await c.post("/ingest", json=["a", {}], headers=auth(LINUX_TOKEN))
-    assert r.status_code == 400 and len(r.json()["rejected"]) == 2 and broker.messages == []
+    assert r.status_code == 202 and r.json()["accepted"] == 0 and len(r.json()["rejected"]) == 2
+    assert broker.on("raw-events") == [] and len(broker.on("dlq.ingestion-gateway")) == 2
+
+
+async def test_refus_renvoye_non_duplique(make_client, broker):
+    """Un lot renvoyé après un 503 ne crée pas de second exemplaire des refus (même Msg-Id)."""
+    async with make_client() as c:
+        await c.post("/ingest", json=[BATCH[0], "texte"], headers=auth(LINUX_TOKEN))
+        await c.post("/ingest", json=[BATCH[0], "texte"], headers=auth(LINUX_TOKEN))
+    assert len(broker.on("dlq.ingestion-gateway")) == 1 and len(broker.on("raw-events")) == 1
 
 
 async def test_lot_trop_volumineux_413(make_client):

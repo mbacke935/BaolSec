@@ -1,0 +1,40 @@
+@startuml seq_w3
+!include _style.iuml
+autonumber
+title W3 — Détection avec fenêtre temporelle
+queue "normalized-events" as N
+participant "Détection" as D
+database "KV\ndetection-state" as KV
+queue "alerts" as A
+
+N ->> D : livraison d'un événement normalisé (event_id)
+D -> D : sélectionner les règles actives applicables
+loop pour chaque règle à fenêtre temporelle
+  D -> KV : get(règle + clé de regroupement)
+  KV --> D : état + révision
+  alt event_id déjà compté
+    D -> D : ignorer (pas de double comptage)
+  else nouvel événement
+    D -> D : ajouter event_id, retirer les entrées hors fenêtre
+    opt seuil atteint (ex. 5 échecs en 10 min)
+      D -> D : alert_id = hash(règle, clé, début de fenêtre)\nplacer l'alerte « en attente » dans l'état
+    end
+    D -> KV : update(état, révision attendue)
+    alt conflit de révision (autre instance)
+      D -> KV : relire et recommencer
+    end
+  end
+end
+opt alerte en attente
+  D ->> A : publier l'alerte (Msg-Id = alert_id)
+  A --> D : PubAck
+  D -> KV : effacer l'alerte en attente
+end
+D --> N : ack (après l'écriture de l'état)
+== Reprise après une panne ==
+D -> KV : au démarrage puis chaque minute :\nlire les états avec une alerte en attente
+D ->> A : republier (même alert_id, doublon écarté)
+A --> D : PubAck
+D -> KV : effacer l'alerte en attente
+!include _legende_seq.iuml
+@enduml

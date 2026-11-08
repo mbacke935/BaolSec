@@ -1,5 +1,5 @@
 {
-  "description": "Bucket KV de l'état des règles de détection (C3 2.6, ADR 0002). Les tests de charge et de reprise de cet état sont faits en C14.",
+  "description": "Bucket KV de l'état des règles de détection (C3 2.6, ADR 0002). Chaque entrée doit expirer à la fin de sa fenêtre + 2 minutes : cette expiration par entrée est posée par detection-worker (C12). Le ttl du bucket (24 h) n'est qu'un plafond de sécurité. Tests de charge et de reprise en C14.",
   "bucket": "detection-state",
   "history": 1,
   "ttl": 86400,

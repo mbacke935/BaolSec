@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     publish_timeout_s: float = 5.0
     publish_concurrency: int = 64
 
-    # Référentiel des sources : PostgreSQL (lecture seule, compte svc_gateway) ou fichier (tests, développement)
+    # Référentiel des sources : PostgreSQL (lecture seule, compte svc_passerelle) ou fichier (tests, développement)
     source_registry: Literal["postgres", "file"] = "postgres"
     postgres_dsn: str | None = Field(None, validation_alias="GATEWAY_POSTGRES_DSN")
     sources_file: Path | None = None

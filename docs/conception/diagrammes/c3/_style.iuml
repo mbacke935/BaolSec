@@ -1,0 +1,43 @@
+skinparam dpi 200
+skinparam shadowing false
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 11
+skinparam roundCorner 6
+skinparam ArrowColor #37474F
+skinparam ArrowThickness 1.2
+skinparam componentStyle uml2
+skinparam component {
+  BackgroundColor #E3F2FD
+  BorderColor #1565C0
+}
+skinparam database {
+  BackgroundColor #FFF8E1
+  BorderColor #F57F17
+}
+skinparam queue {
+  BackgroundColor #E8F5E9
+  BorderColor #2E7D32
+}
+skinparam node {
+  BackgroundColor #FAFAFA
+  BorderColor #546E7A
+}
+skinparam package {
+  BackgroundColor #FFFFFF
+  BorderColor #90A4AE
+  FontStyle bold
+}
+skinparam actor {
+  BackgroundColor #FFFFFF
+  BorderColor #37474F
+}
+skinparam note {
+  BackgroundColor #FFFDE7
+  BorderColor #BDBDBD
+}
+skinparam sequence {
+  ParticipantBackgroundColor #E3F2FD
+  ParticipantBorderColor #1565C0
+  LifeLineBorderColor #90A4AE
+  GroupBackgroundColor #ECEFF1
+}

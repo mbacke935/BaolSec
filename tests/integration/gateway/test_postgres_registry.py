@@ -36,9 +36,9 @@ CREATE TABLE config.source_credentials (
   id uuid PRIMARY KEY, source_id uuid NOT NULL REFERENCES config.sources(id),
   credential_type config.credential_type NOT NULL, secret_hash text, cert_fingerprint text UNIQUE,
   created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz, revoked_at timestamptz);
-CREATE ROLE svc_gateway_test LOGIN PASSWORD 'test';
-GRANT USAGE ON SCHEMA config TO svc_gateway_test;
-GRANT SELECT ON config.sources, config.source_credentials TO svc_gateway_test;
+CREATE ROLE svc_passerelle_test LOGIN PASSWORD 'test';
+GRANT USAGE ON SCHEMA config TO svc_passerelle_test;
+GRANT SELECT ON config.sources, config.source_credentials TO svc_passerelle_test;
 """
 
 SOURCES = """
@@ -70,17 +70,17 @@ def with_db(dsn: str, db: str, user: str | None = None, password: str | None = N
 def database():
     with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
         admin.execute(f"DROP DATABASE IF EXISTS {DB}")
-        admin.execute("DROP ROLE IF EXISTS svc_gateway_test")
+        admin.execute("DROP ROLE IF EXISTS svc_passerelle_test")
         admin.execute(f"CREATE DATABASE {DB}")
     with psycopg.connect(with_db(ADMIN_DSN, DB), autocommit=True) as conn:
         conn.execute(SCHEMA)
         conn.execute(SOURCES)
         conn.execute(CREDENTIALS, {"valid": hash_token("bsk_valide"), "revoked": hash_token("bsk_revoque"),
                             "expired": hash_token("bsk_expire"), "disabled": hash_token("bsk_desactive")})
-    yield with_db(ADMIN_DSN, DB, "svc_gateway_test", "test")
+    yield with_db(ADMIN_DSN, DB, "svc_passerelle_test", "test")
     with psycopg.connect(ADMIN_DSN, autocommit=True) as admin:
         admin.execute(f"DROP DATABASE IF EXISTS {DB} WITH (FORCE)")
-        admin.execute("DROP ROLE IF EXISTS svc_gateway_test")
+        admin.execute("DROP ROLE IF EXISTS svc_passerelle_test")
 
 
 async def test_seuls_les_identifiants_valides_sont_charges(database):

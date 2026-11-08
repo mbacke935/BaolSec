@@ -1,4 +1,4 @@
-.PHONY: help up down test broker-up broker-init broker-restart test-broker bench-broker gateway-dev gateway-up test-gateway agents-up agents-check test-agents
+.PHONY: help up down test broker-up broker-init broker-restart broker-reset test-broker bench-broker gateway-dev gateway-up test-gateway agents-up agents-check test-agents
 
 COMPOSE = docker compose --env-file .env -f infrastructure/compose/compose.yaml
 # Depuis la machine hôte, le broker est joint par le port publié sur 127.0.0.1.
@@ -13,13 +13,14 @@ help:
 	@echo "make broker-up      : démarrer le broker et appliquer la topologie"
 	@echo "make broker-init    : réappliquer infrastructure/broker/topology.json"
 	@echo "make broker-restart : redémarrer le broker (les données sont conservées)"
+	@echo "make broker-reset   : supprimer les données du broker et recréer les flux (développement)"
 	@echo "make test-broker    : tests d'intégration du broker (C8)"
 	@echo "make bench-broker   : mesure du débit de publication (ADR 0002)"
 	@echo "make gateway-dev    : certificats et sources de développement (une fois)"
 	@echo "make gateway-up     : broker + passerelle d'ingestion"
 	@echo "make test-gateway   : tests unitaires et d'intégration de la passerelle (C6)"
-	@echo "make agents-up      : passerelle + agent Fluent Bit de test + relais Syslog"
-	@echo "make agents-check   : syntaxe des configurations des agents et du relais"
+	@echo "make agents-up      : passerelle + agent Fluent Bit de test + collecteur Syslog"
+	@echo "make agents-check   : syntaxe des configurations des agents et du collecteur"
 	@echo "make test-agents    : coupure réseau puis reconnexion, comptage avant/après (C7)"
 
 up:
@@ -43,6 +44,12 @@ broker-init:
 broker-restart:
 	$(COMPOSE) restart broker
 
+broker-reset:
+	@echo "Supprime toutes les données du broker (flux, KV) puis recrée la topologie. Développement uniquement."
+	$(COMPOSE) rm -sf broker
+	docker volume rm -f baolsec_broker-data
+	$(MAKE) broker-up
+
 test-broker:
 	$(WITH_ENV) $(UV_TEST) pytest -v -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests/integration/broker
 
@@ -65,23 +72,20 @@ COMPOSE_AGENTS = $(COMPOSE) --profile agents-test
 FB_IMAGE = fluent/fluent-bit:5.1.5
 FB_CHECK_ENV = -e BAOLSEC_GATEWAY_HOST=passerelle -e BAOLSEC_GATEWAY_PORT=8443 -e BAOLSEC_SOURCE_TOKEN=x \
   -e BAOLSEC_CA_FILE=/agents/README.md -e BAOLSEC_STATE_DIR=/tmp -e BAOLSEC_BUFFER_LIMIT=1G \
-  -e BAOLSEC_WEBAPP_ACCESS_LOG=/tmp/a.log -e BAOLSEC_WEBAPP_APP_LOG=/tmp/b.log -e BAOLSEC_TEST_LOG=/tmp/t.log
+  -e BAOLSEC_WEBAPP_ACCESS_LOG=/tmp/a.log -e BAOLSEC_WEBAPP_APP_LOG=/tmp/b.log -e BAOLSEC_TEST_LOG=/tmp/t.log \
+  -e BAOLSEC_LISTEN_PORT=514
 
 agents-up: gateway-up
-	@test -f infrastructure/tls/dev/agent-test.env || bash scripts/development/init_dev_gateway.sh
+	@test -f infrastructure/tls/dev/collector.env || bash scripts/development/init_dev_gateway.sh
 	mkdir -p test-data/runtime/agent && touch test-data/runtime/agent/auth-test.log
-	$(COMPOSE_AGENTS) up -d --build agent-test syslog-relay
+	$(COMPOSE_AGENTS) up -d agent-test syslog-collector
 
 agents-check:
-	@for c in linux/fluent-bit.yaml linux/fluent-bit-journald.yaml webapp/fluent-bit.yaml test/fluent-bit-test.yaml; do \
+	@for c in linux/fluent-bit.yaml linux/fluent-bit-journald.yaml webapp/fluent-bit.yaml syslog-collector/fluent-bit.yaml test/fluent-bit-test.yaml; do \
 	  echo "Fluent Bit : $$c"; \
 	  docker run --rm $(FB_CHECK_ENV) -v $(CURDIR)/agents/fluent-bit:/agents:ro $(FB_IMAGE) \
 	    /fluent-bit/bin/fluent-bit --dry-run -c /agents/$$c || exit 1; done
 	@echo "Windows : vérifiée par un agent Windows réel (l'entrée winevtlog n'existe pas sous Linux)"
-	docker build -q -t baolsec-syslog-relay agents/syslog-relay >/dev/null
-	@test -f infrastructure/tls/dev/syslog-relay.crt || { echo "Lancer d'abord : make gateway-dev"; exit 1; }
-	docker run --rm -e BAOLSEC_GATEWAY_HOST=passerelle -v $(CURDIR)/infrastructure/tls/dev:/etc/baolsec-relay:ro \
-	  baolsec-syslog-relay rsyslogd -N1 -f /etc/rsyslog-baolsec.conf
 
 test-agents:
 	$(WITH_ENV) $(UV_TEST) pytest -v -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests/integration/agents

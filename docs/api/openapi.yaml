@@ -19,6 +19,7 @@ tags:
 - name: Règles
 - name: Paramètres
 - name: Audit
+- name: File de rejet
 - name: Événements
 - name: Alertes
 - name: Incidents
@@ -869,6 +870,99 @@ paths:
           - refus
           - echec
         description: Résultat
+  /dlq:
+    get:
+      operationId: listDlq
+      summary: Lister les messages rejetés (file de rejet)
+      tags:
+      - File de rejet
+      x-baolsec-roles:
+      - administrateur
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Page'
+                - type: object
+                  required:
+                  - items
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DlqEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+      description: 'Lecture seule du flux dlq du broker : événements refusés à l''ingestion et messages abandonnés
+        après 5 tentatives. Le contenu complet est obtenu par GET /dlq/{seq}.'
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/Size'
+      - $ref: '#/components/parameters/From'
+      - $ref: '#/components/parameters/To'
+      - name: service
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Service qui a rejeté le message
+      - name: reason_code
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - parse_error
+          - validation_error
+          - mapping_error
+          - index_rejected
+          - processing_error
+        description: Motif
+      - name: source_id
+        in: query
+        required: false
+        schema: *id002
+        description: Source concernée
+  /dlq/{seq}:
+    get:
+      operationId: getDlq
+      summary: Consulter un message rejeté, avec son contenu d'origine
+      tags:
+      - File de rejet
+      x-baolsec-roles:
+      - administrateur
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DlqDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+      parameters:
+      - name: seq
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+        description: Numéro de séquence du message dans le flux dlq
   /events:
     get:
       operationId: searchEvents
@@ -1783,6 +1877,17 @@ components:
           - integer
           - 'null'
           minimum: 0
+        criticality:
+          type:
+          - string
+          - 'null'
+          enum:
+          - faible
+          - moyenne
+          - elevee
+          - critique
+          - null
+          description: Criticité de l'actif, copiée dans baolsec.source.criticality des événements
         is_enabled:
           type: boolean
         active_credentials:
@@ -1824,6 +1929,12 @@ components:
         expected_min_events_per_h:
           type: integer
           minimum: 0
+        criticality:
+          enum:
+          - faible
+          - moyenne
+          - elevee
+          - critique
         credential:
           $ref: '#/components/schemas/CredentialCreate'
       required:
@@ -1845,6 +1956,17 @@ components:
           - integer
           - 'null'
           minimum: 0
+        criticality:
+          type:
+          - string
+          - 'null'
+          enum:
+          - faible
+          - moyenne
+          - elevee
+          - critique
+          - null
+          description: Criticité de l'actif, copiée dans baolsec.source.criticality des événements
         is_enabled:
           type: boolean
     CredentialCreate:
@@ -2026,6 +2148,47 @@ components:
         value: {}
       required:
       - value
+    DlqEntry:
+      type: object
+      additionalProperties: false
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+        received_at: *id010
+        service: *id011
+        original_stream: *id011
+        reason_code: *id011
+        reason: *id011
+        message_id: *id011
+        source_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+      required:
+      - seq
+      - received_at
+      - service
+      - original_stream
+      - reason_code
+      - reason
+      - message_id
+      description: Résumé d'un message du flux dlq (sans le contenu d'origine).
+    DlqDetail:
+      type: object
+      additionalProperties: false
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+        received_at: *id010
+        message:
+          $ref: ../../shared/contracts/dlq_message/v1/schema.json
+      required:
+      - seq
+      - received_at
+      - message
     AuditEntry:
       type: object
       additionalProperties: false

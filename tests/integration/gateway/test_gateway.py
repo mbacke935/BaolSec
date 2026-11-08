@@ -174,6 +174,20 @@ async def test_message_malforme_et_trop_volumineux():
     assert bad.status_code == 400 and big.status_code == 413
 
 
+async def test_evenement_invalide_conserve_dans_la_file_de_rejet():
+    marker = unique("invalide")
+    async with client() as c:
+        r = await c.post("/ingest", headers=headers(LINUX), json=[{"log": f"valide {marker}"}, {"log": 42, "m": marker}])
+    assert r.status_code == 202 and r.json()["accepted"] == 1 and len(r.json()["rejected"]) == 1
+    nc = await asyncio.wait_for(nats.connect(BROKER_URL, token=BROKER_TOKEN), 10)
+    try:
+        msg = await nc.jetstream().get_last_msg("DLQ", "dlq.ingestion-gateway")
+    finally:
+        await nc.close()
+    body = json.loads(msg.data)
+    assert marker in body["payload"] and body["original_stream"] == "ingest" and body["reason_code"] == "validation_error"
+
+
 async def test_surcharge_renvoie_429():
     async with client() as c:
         statuses = set()
@@ -191,7 +205,7 @@ async def test_surcharge_renvoie_429():
 
 async def test_syslog_avec_certificat_enregistre():
     marker = unique("syslog")
-    await syslog_send("syslog-relay", [
+    await syslog_send("syslog-client", [
         f"<134>1 2026-11-05T10:00:00Z fw-edge-01 filterlog 3012 - - block {marker} {i}" for i in range(3)])
     events = await raw_events_containing(marker)
     assert len(events) == 3 and {e["transport"] for e in events} == {"syslog"}
@@ -252,7 +266,7 @@ async def test_syslog_pendant_panne_du_broker_rien_perdu():
     marker = unique("syslog-panne")
     run(BROKER_STOP)
     try:
-        send = asyncio.create_task(syslog_send("syslog-relay", [f"<134>1 - fw - - - - {marker} {i}" for i in range(3)]))
+        send = asyncio.create_task(syslog_send("syslog-client", [f"<134>1 - fw - - - - {marker} {i}" for i in range(3)]))
         await asyncio.sleep(3)
     finally:
         run(BROKER_START)

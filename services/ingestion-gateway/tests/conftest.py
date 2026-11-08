@@ -14,6 +14,8 @@ from gateway.sources_cache.file import FileSourceRegistry
 ROOT = Path(__file__).resolve().parents[3]
 RAW_SCHEMA = json.loads((ROOT / "shared/contracts/raw_event/v1/schema.json").read_text(encoding="utf-8"))
 RAW_VALIDATOR = Draft202012Validator(RAW_SCHEMA, format_checker=FormatChecker())
+DLQ_SCHEMA = json.loads((ROOT / "shared/contracts/dlq_message/v1/schema.json").read_text(encoding="utf-8"))
+DLQ_VALIDATOR = Draft202012Validator(DLQ_SCHEMA, format_checker=FormatChecker())
 
 LINUX_ID = "3f1c2a4e-8b7d-4c21-9a55-1e2f3a4b5c61"
 WINDOWS_ID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c62"
@@ -71,6 +73,9 @@ class FakeBroker:
         self.messages.append((subject, json.loads(data)))
         return PublishResult("RAW_EVENTS", len(self.messages), False)
 
+    def on(self, subject: str) -> list[dict]:
+        return [m for s, m in self.messages if s == subject]
+
 
 @pytest.fixture
 def broker() -> FakeBroker:
@@ -79,4 +84,9 @@ def broker() -> FakeBroker:
 
 def assert_raw_event(event: dict) -> None:
     errors = sorted(RAW_VALIDATOR.iter_errors(event), key=str)
+    assert not errors, [e.message for e in errors]
+
+
+def assert_dlq_message(message: dict) -> None:
+    errors = sorted(DLQ_VALIDATOR.iter_errors(message), key=str)
     assert not errors, [e.message for e in errors]

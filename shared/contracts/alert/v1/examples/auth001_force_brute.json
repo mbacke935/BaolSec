@@ -46,11 +46,11 @@
       "window_start": "2026-11-02T10:36:02Z",
       "group_key": "admin|10.0.4.23",
       "event_ids": [
-        "PC-WIN-COMPTA:Security:1847201",
-        "PC-WIN-COMPTA:Security:1847218",
-        "PC-WIN-COMPTA:Security:1847236",
-        "PC-WIN-COMPTA:Security:1847250",
-        "PC-WIN-COMPTA:Security:1847263"
+        "win:PC-WIN-COMPTA:Security:1847201",
+        "win:PC-WIN-COMPTA:Security:1847218",
+        "win:PC-WIN-COMPTA:Security:1847236",
+        "win:PC-WIN-COMPTA:Security:1847250",
+        "win:PC-WIN-COMPTA:Security:1847263"
       ]
     }
   }

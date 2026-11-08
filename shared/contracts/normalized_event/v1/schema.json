@@ -441,6 +441,15 @@
                 "direct",
                 "rejeu"
               ]
+            },
+            "criticality": {
+              "enum": [
+                "faible",
+                "moyenne",
+                "elevee",
+                "critique"
+              ],
+              "description": "Criticité de l'actif déclarée par l'Administrateur (config.sources.criticality), distincte de la sévérité de l'événement."
             }
           },
           "required": [
@@ -610,26 +619,6 @@
     "baolsec"
   ],
   "allOf": [
-    {
-      "if": {
-        "properties": {
-          "event": {
-            "properties": {
-              "category": {
-                "contains": {
-                  "const": "authentication"
-                }
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "user"
-        ]
-      }
-    },
     {
       "if": {
         "properties": {

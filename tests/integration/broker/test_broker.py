@@ -93,6 +93,7 @@ async def test_topologie_conforme():
             assert cfg.duplicate_window == TOPOLOGY["stream_defaults"]["duplicate_window"]
             assert cfg.max_age == s["max_age"] and cfg.max_bytes == s["max_bytes"]
             assert val(cfg.discard) == s.get("discard", TOPOLOGY["stream_defaults"]["discard"])
+            assert val(cfg.retention) == s.get("retention", TOPOLOGY["stream_defaults"]["retention"])
             for durable in s["consumers"]:
                 c = (await js.consumer_info(s["name"], durable)).config
                 assert val(c.ack_policy) == "explicit"
@@ -205,6 +206,41 @@ async def test_message_non_acquitte_est_relivre(temp_stream):
     assert second.msg_id == "lost" and second.delivery_count == 2
     await second.ack()
     await broker.close()
+
+
+# ---------------------------------------------------------------- raw-events : pas de suppression silencieuse
+
+async def test_flux_plein_refuse_au_lieu_de_supprimer():
+    """Réglages de RAW_EVENTS (interest + refus si plein) sur un petit flux temporaire :
+    un message non traité n'est jamais supprimé pour faire de la place ; le nouveau est refusé,
+    puis accepté dès que les consommateurs ont acquitté les anciens."""
+    nc = await connect()
+    js = nc.jetstream()
+    name = f"TEST_{uuid.uuid4().hex[:8].upper()}"
+    subject = f"test.{name.lower()}"
+    await js.add_stream(StreamConfig(name=name, subjects=[subject], retention="interest", discard="new",
+                                     max_msgs=3, storage="file"))
+    try:
+        await js.add_consumer(name, ConsumerConfig(durable_name="w", ack_policy=AckPolicy.EXPLICIT))
+        for i in range(3):
+            await js.publish(subject, f"m{i}".encode(), headers={"Nats-Msg-Id": f"f{i}"})
+        broker = await NatsBroker.connect(URL, TOKEN)
+        try:
+            from baolsec_common.messaging import BrokerUnavailable
+            with pytest.raises(BrokerUnavailable):
+                await broker.publish(subject, b"m3", msg_id="f3", timeout=2)
+            sub = await broker.subscribe(name, "w")
+            for m in await sub.fetch(3, timeout=2):
+                await m.ack()
+            await asyncio.sleep(0.5)
+            result = await broker.publish(subject, b"m3", msg_id="f3", timeout=2)
+            assert not result.duplicate
+        finally:
+            await broker.close()
+        assert (await js.stream_info(name)).state.messages == 1, "les messages acquittés ont été supprimés"
+    finally:
+        await js.delete_stream(name)
+        await nc.close()
 
 
 # ---------------------------------------------------------------- persistance après redémarrage

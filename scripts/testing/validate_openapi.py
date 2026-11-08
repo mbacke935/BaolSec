@@ -21,7 +21,7 @@ from openapi_spec_validator import validate
 from openapi_spec_validator.readers import read_from_filename
 
 SPEC = Path(__file__).resolve().parents[2] / "docs" / "api" / "openapi.yaml"
-ADMIN_ONLY = ("/users", "/roles", "/settings", "/audit")
+ADMIN_ONLY = ("/users", "/roles", "/settings", "/audit", "/dlq")
 METHODS = {"get", "post", "put", "patch", "delete"}
 
 

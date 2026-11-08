@@ -6,8 +6,12 @@
     "type": "firewall",
     "ingestion_mode": "direct"
   },
-  "transport": "syslog",
+  "transport": "https",
   "received_at": "2026-11-02T10:27:56.410Z",
+  "agent": {
+    "name": "fluent-bit",
+    "read_at": "2026-11-02T10:27:56.180Z"
+  },
   "payload_format": "text",
   "payload": "<134>Nov  2 10:27:56 fw-edge-01 filterlog[3012]: 5,,,1000000103,em0,match,block,out,4,0x0,,64,0,0,DF,6,tcp,60,10.0.2.47,45.33.10.2,49822,443,0,S,1234567890,,64240,,mss"
 }

@@ -1,0 +1,31 @@
+digraph F {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Contrats échangés entre les services</b><br/> >, fontsize=24, dpi=200, nodesep=0.5, ranksep=0.55, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=17];
+  edge [fontname="DejaVu Sans", fontsize=14, color="#37474F"];
+  node [shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#78909C"];
+  agents [label="Agents Fluent Bit\n(tampon disque)"]; coll [label="Collecteur Fluent Bit\n(Syslog pfSense, tampon disque)"];
+  node [shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0"];
+  gw [label="ingestion-gateway"]; nm [label="normalization-worker"]; dt [label="detection-worker"];
+  inc [label="incident-builder"]; idx [label="indexing-worker"]; cov [label="coverage-worker"]; api [label="api"];
+  node [shape=cds, style=filled, fillcolor="#FFF8E1", color="#F57F17"];
+  raw [label="raw-events\nraw_event/v1"]; norm [label="normalized-events\nnormalized_event/v1 (ECS 9.5.0)"];
+  al [label="alerts\nalert/v1"]; dlq [label="dlq\ndlq_message/v1"];
+  agents -> gw [label="POST /ingest\n202 / 503"]; coll -> gw;
+  edge [arrowhead=empty, arrowsize=1.1];
+  gw -> raw; raw -> nm; raw -> cov;
+  nm -> norm; norm -> dt; norm -> idx; norm -> cov;
+  dt -> al; al -> inc; al -> idx;
+  {gw nm dt inc idx cov} -> dlq [style=dotted, color="#C62828"];
+  edge [arrowhead=normal, arrowsize=1];
+  api -> inc [label="incident_command/v1\n→ incident_command_result/v1"];
+  LEG [shape=plain, fontsize=14, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein, pointe pleine</td><td align="left">appel synchrone (HTTPS) : l'émetteur attend la réponse</td></tr>
+    <tr><td>trait plein, pointe creuse</td><td align="left">message asynchrone par le broker : publication ou livraison</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">mise en file de rejet : événement invalide à l'ingestion, ou échec après 5 tentatives</td></tr>
+    <tr><td bgcolor="#FFF8E1">flux (jaune)</td><td align="left">flux persistant du broker et contrat qu'il transporte</td></tr>
+    <tr><td bgcolor="#ECEFF1">gris</td><td align="left">collecte, hors des services de BaolSec</td></tr>
+  </table>>];
+  dlq -> LEG [style=invis];
+  {rank=same; agents; coll;}
+}

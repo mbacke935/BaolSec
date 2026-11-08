@@ -1,6 +1,6 @@
 {
   "contract": "raw_event/v1",
-  "event_id": "PC-WIN-COMPTA:Security:1847263",
+  "event_id": "win:PC-WIN-COMPTA:Security:1847263",
   "source": {
     "id": "7a9e0b12-3c4d-4e5f-8a6b-7c8d9e0f1a22",
     "type": "windows",
@@ -12,5 +12,5 @@
     "name": "fluent-bit"
   },
   "payload_format": "json",
-  "payload": "{\"EventID\": 4625, \"Computer\": \"PC-WIN-COMPTA\", \"Channel\": \"Security\", \"ProviderName\": \"Microsoft-Windows-Security-Auditing\", \"RecordNumber\": 1847263, \"TimeCreated\": \"2026-11-02T10:40:52.318Z\", \"TargetUserName\": \"admin\", \"IpAddress\": \"10.0.4.23\", \"IpPort\": \"51240\", \"LogonType\": \"3\", \"FailureReason\": \"%%2313\"}"
+  "payload": "{\"EventID\": 4625, \"Computer\": \"PC-WIN-COMPTA\", \"Channel\": \"Security\", \"ProviderName\": \"Microsoft-Windows-Security-Auditing\", \"EventRecordID\": 1847263, \"TimeCreated\": \"2026-11-02T10:40:52.318Z\", \"TargetUserName\": \"admin\", \"IpAddress\": \"10.0.4.23\", \"IpPort\": \"51240\", \"LogonType\": \"3\", \"FailureReason\": \"%%2313\"}"
 }

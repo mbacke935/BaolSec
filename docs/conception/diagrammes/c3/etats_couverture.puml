@@ -1,0 +1,22 @@
+@startuml etats_couverture
+!include _style.iuml
+title États d'une source (service Couverture)
+[*] --> INCONNUE : source enregistrée
+INCONNUE --> ACTIVE : premier événement reçu et traité
+ACTIVE --> SILENCIEUSE : aucune réception > seuil
+ACTIVE --> FLUX_INCOMPLET : reçu mais non traité\nou volume < attendu
+SILENCIEUSE --> ACTIVE : réception et traitement reprennent
+FLUX_INCOMPLET --> ACTIVE : traitement rétabli
+FLUX_INCOMPLET --> SILENCIEUSE : plus aucune réception
+SILENCIEUSE --> DESACTIVEE : désactivée par l'Administrateur
+ACTIVE --> DESACTIVEE
+DESACTIVEE --> INCONNUE : réactivée
+note right of SILENCIEUSE : déclenche le marquage\ndes règles affectées
+legend bottom left
+  |= Notation |= Signification |
+  | disque plein | état initial (source enregistrée) |
+  | rectangle arrondi | état de couverture d'une source |
+  | flèche pleine | transition, avec l'événement qui la déclenche |
+  | note | effet produit par l'entrée dans l'état |
+endlegend
+@enduml

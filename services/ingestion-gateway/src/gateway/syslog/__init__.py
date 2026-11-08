@@ -7,7 +7,7 @@
 - Le contenu n'est pas interprété ici : RFC 5424 ou format BSD, c'est la normalisation qui parse.
 - Syslog n'a pas d'accusé applicatif : si le broker ne répond pas, la passerelle cesse de lire la
   connexion (sans rien perdre de ce qu'elle a déjà lu) et réessaie. TCP ralentit alors l'émetteur,
-  dont le relais garde les messages dans sa file persistante (C3 4.3, C7).
+  qui doit garder les messages de son côté. pfSense ne passe pas par ici mais par le collecteur Fluent Bit (C7).
 """
 from __future__ import annotations
 
@@ -115,6 +115,16 @@ class SyslogServer:
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 10.0)
 
+    async def _reject_until_stored(self, source: Source, text: str) -> None:
+        delay = 0.5
+        while True:
+            try:
+                await self._publisher.reject(source.id, text, f"message Syslog trop long ({len(text)} caractères)")
+                return
+            except BrokerUnavailable:
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 10.0)
+
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
         fingerprint = peer_fingerprint(writer)
@@ -142,9 +152,13 @@ class SyslogServer:
                 if frame is None:
                     break
                 text = frame.decode("utf-8", errors="replace").strip()
-                if not text or len(text) > self._max_chars:
+                if not text:
+                    metrics.REJECTIONS.labels(T, "empty").inc()
+                    continue
+                if len(text) > self._max_chars:
                     metrics.EVENTS.labels(source.id, T, "rejected").inc()
-                    metrics.REJECTIONS.labels(T, "empty" if not text else "too_large").inc()
+                    metrics.REJECTIONS.labels(T, "too_large").inc()
+                    await self._reject_until_stored(source, text)
                     continue
                 await self._limiter.acquire(source.id, 1)
                 event = build_raw_event(source, T, utc_now(), "text", text)

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://baolsec.local/contracts/dlq_message/v1/schema.json",
   "title": "dlq_message/v1",
-  "description": "Message publié dans la file de rejet par le service qui abandonne un message après 5 tentatives (C3 3.1). Indépendant d'ECS.",
+  "description": "Message publié dans la file de rejet : par un service qui abandonne un message après 5 tentatives, ou par la passerelle pour un événement reçu invalide, avant de répondre à l'émetteur (C3 3.1, W1). Indépendant d'ECS.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -12,30 +12,40 @@
     "message_id": {
       "type": "string",
       "minLength": 1,
-      "description": "Msg-Id du message d'origine (event_id ou alert_id)."
+      "description": "Msg-Id du message d'origine (event_id ou alert_id) ; pour un événement refusé à l'ingestion, empreinte SHA-256 de (source, contenu reçu)."
     },
     "original_stream": {
       "enum": [
+        "ingest",
         "raw-events",
         "normalized-events",
         "alerts"
-      ]
+      ],
+      "description": "ingest : événement refusé par la passerelle avant toute publication."
     },
     "original_contract": {
       "enum": [
+        "ingest_record",
         "raw_event/v1",
         "normalized_event/v1",
         "alert/v1"
-      ]
+      ],
+      "description": "ingest_record : enregistrement tel que reçu par POST /ingest."
     },
     "service": {
       "enum": [
+        "ingestion-gateway",
         "normalization-worker",
         "detection-worker",
         "incident-builder",
         "indexing-worker",
         "coverage-worker"
       ]
+    },
+    "source_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Source authentifiée, pour un événement refusé à l'ingestion."
     },
     "attempts": {
       "type": "integer",
@@ -71,7 +81,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 131072,
-      "description": "Message d'origine complet."
+      "description": "Message d'origine complet ; tronqué au-delà de 131 072 caractères, ce que reason indique."
     }
   },
   "required": [
@@ -86,5 +96,49 @@
     "failed_at",
     "payload_encoding",
     "payload"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "original_stream": {
+            "const": "ingest"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "source_id"
+        ],
+        "properties": {
+          "service": {
+            "const": "ingestion-gateway"
+          },
+          "original_contract": {
+            "const": "ingest_record"
+          },
+          "attempts": {
+            "const": 1
+          },
+          "reason_code": {
+            "const": "validation_error"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "service": {
+            "not": {
+              "const": "ingestion-gateway"
+            }
+          },
+          "original_contract": {
+            "not": {
+              "const": "ingest_record"
+            }
+          }
+        }
+      }
+    }
   ]
 }

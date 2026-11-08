@@ -1,5 +1,5 @@
 {
-  "description": "Flux et consommateurs durables de BaolSec (ADR 0002). Durées en secondes, tailles en octets.",
+  "description": "Flux et consommateurs durables de BaolSec (ADR 0002). Durées en secondes, tailles en octets. RAW_EVENTS : un message est supprimé dès que tous ses consommateurs l'ont acquitté (interest) ; plein, il refuse les nouveaux messages (la passerelle répond 503 et les agents gardent les événements dans leur tampon). Les autres flux sont conservés pour la relecture.",
   "stream_defaults": {
     "storage": "file",
     "retention": "limits",
@@ -12,34 +12,59 @@
     "ack_policy": "explicit",
     "deliver_policy": "all",
     "max_deliver": 5,
-    "backoff": [5, 15, 30, 60],
+    "backoff": [
+      5,
+      15,
+      30,
+      60
+    ],
     "max_ack_pending": 1000
   },
   "streams": [
     {
       "name": "RAW_EVENTS",
-      "subjects": ["raw-events"],
-      "max_age": 259200,
+      "subjects": [
+        "raw-events"
+      ],
+      "max_age": 604800,
       "max_bytes": 21474836480,
-      "consumers": ["normalization", "coverage-raw"]
+      "consumers": [
+        "normalization",
+        "coverage-raw"
+      ],
+      "retention": "interest",
+      "discard": "new"
     },
     {
       "name": "NORMALIZED_EVENTS",
-      "subjects": ["normalized-events"],
-      "max_age": 259200,
+      "subjects": [
+        "normalized-events"
+      ],
+      "max_age": 604800,
       "max_bytes": 21474836480,
-      "consumers": ["detection", "indexing-events", "coverage-normalized"]
+      "consumers": [
+        "detection",
+        "indexing-events",
+        "coverage-normalized"
+      ]
     },
     {
       "name": "ALERTS",
-      "subjects": ["alerts"],
-      "max_age": 2592000,
+      "subjects": [
+        "alerts"
+      ],
+      "max_age": 604800,
       "max_bytes": 2147483648,
-      "consumers": ["incident-builder", "indexing-alerts"]
+      "consumers": [
+        "incident-builder",
+        "indexing-alerts"
+      ]
     },
     {
       "name": "DLQ",
-      "subjects": ["dlq.>"],
+      "subjects": [
+        "dlq.>"
+      ],
       "max_age": 2592000,
       "max_bytes": 2147483648,
       "discard": "new",

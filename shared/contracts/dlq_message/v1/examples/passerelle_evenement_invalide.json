@@ -1,0 +1,14 @@
+{
+  "contract": "dlq_message/v1",
+  "message_id": "cddeecaa50c1e372450322743de8c3319d4b0574c728a2bded7212f30096212d",
+  "original_stream": "ingest",
+  "original_contract": "ingest_record",
+  "service": "ingestion-gateway",
+  "source_id": "c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e74",
+  "attempts": 1,
+  "reason_code": "validation_error",
+  "reason": "champ log vide ou non textuel (enregistrement 3 du lot)",
+  "failed_at": "2026-11-02T10:22:18.031Z",
+  "payload_encoding": "json",
+  "payload": "{\"log\": 42}"
+}

@@ -1,0 +1,51 @@
+# Collecteur Syslog BaolSec pour pfSense (et tout équipement qui ne peut qu'émettre en Syslog).
+#
+# pfSense de base n'émet qu'en UDP (documentation Netgate) : le collecteur est placé sur le même
+# réseau local que lui. Il écrit chaque message sur disque, puis l'envoie à la passerelle en HTTPS
+# comme les autres agents ; un message n'est retiré du tampon qu'après la réponse 202.
+# L'entrée TCP sert aux équipements qui savent émettre en TCP (pfSense avec le paquet syslog-ng).
+# Variables : voir ../agent.env.example (BAOLSEC_LISTEN_PORT, jeton de la source pare-feu)
+service:
+  flush: 1
+  log_level: info
+  parsers_file: parsers.yaml
+  storage.path: ${BAOLSEC_STATE_DIR}/storage
+  storage.sync: full
+  storage.checksum: on
+  storage.backlog.mem_limit: 16M
+  scheduler.base: 2
+  scheduler.cap: 30
+
+includes:
+  - ../common/gateway-output.yaml
+
+pipeline:
+  inputs:
+    - name: syslog
+      tag: firewall.syslog
+      mode: udp
+      listen: 0.0.0.0
+      port: ${BAOLSEC_LISTEN_PORT}
+      parser: baolsec-brut
+      raw_message_key: log
+      buffer_chunk_size: 64k
+      buffer_max_size: 64k
+      receive_buffer_size: 4M
+      storage.type: filesystem
+
+    - name: syslog
+      tag: firewall.syslog
+      mode: tcp
+      listen: 0.0.0.0
+      port: ${BAOLSEC_LISTEN_PORT}
+      parser: baolsec-brut
+      raw_message_key: log
+      buffer_chunk_size: 64k
+      buffer_max_size: 64k
+      storage.type: filesystem
+
+  filters:
+    # Seule la ligne brute est transmise ; la normalisation la parse (C9).
+    - name: record_modifier
+      match: firewall.syslog
+      remove_key: message

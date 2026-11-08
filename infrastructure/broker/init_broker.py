@@ -74,7 +74,13 @@ async def apply(url: str, token: str | None) -> None:
         for s in topo["streams"]:
             cfg = stream_config(topo["stream_defaults"], s)
             try:
-                await js.stream_info(cfg.name)
+                info = await js.stream_info(cfg.name)
+                current = getattr(info.config.retention, "value", info.config.retention)
+                if current != cfg.retention.value:
+                    raise SystemExit(
+                        f"Le flux {cfg.name} existe avec la rétention « {current} » ; la nouvelle valeur « {cfg.retention.value} » "
+                        "n'est pas modifiable sur un flux existant. En développement : make broker-reset (supprime les données du broker)."
+                    )
                 await js.update_stream(cfg)
                 print(f"flux mis à jour      {cfg.name}")
             except NotFoundError:
