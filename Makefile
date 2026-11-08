@@ -34,7 +34,7 @@ down:
 	$(COMPOSE) down
 
 test:
-	@for s in services/*/; do (cd $$s && uv run --quiet --extra dev pytest -q -o asyncio_default_fixture_loop_scope=function; r=$$?; [ $$r -eq 0 ] || [ $$r -eq 5 ]) || exit 1; done
+	@for s in services/*/; do (cd $$s && uv run --quiet --extra dev pytest -q; r=$$?; [ $$r -eq 0 ] || [ $$r -eq 5 ]) || exit 1; done
 	$(UV_TEST) pytest -q -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function shared/python-common/tests
 
 broker-up:
