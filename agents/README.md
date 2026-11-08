@@ -62,7 +62,12 @@ avant la règle `DROP`.
 3. Définir les variables `BAOLSEC_*` pour le service (variables système), avec des chemins Windows.
 4. Commande du service : `fluent-bit.exe -c C:\ProgramData\BaolSec\agent\windows\fluent-bit.yaml`.
 5. Activer l'audit des connexions (stratégie « Auditer les événements de connexion », succès et
-   échecs) pour que les événements 4624 et 4625 soient produits.
+   échecs) pour que les événements 4624 et 4625 soient produits, et l'audit de la création de
+   processus (4688), avec la ligne de commande si possible.
+
+La configuration envoie les données de chaque événement nommées dans `EventData`
+(`event_data_as_map`) : c'est la forme que lit la normalisation (C9). Le fichier
+`scripts/testing/evtx_to_fluentbit.py` reproduit cette forme à partir de fichiers EVTX pour les tests.
 
 ## Collecteur Syslog pour pfSense
 
@@ -77,6 +82,9 @@ donc placé sur le même réseau local que pfSense :
 
 Le collecteur utilise donc exactement le même mécanisme que les agents. Dans pfSense : Statut >
 Journaux système > Paramètres > Journalisation à distance, adresse du collecteur, port 514.
+Dans « Contenu de la journalisation à distance », ne cocher que **les événements du pare-feu** :
+la normalisation (C9) ne traite que les messages `filterlog` d'une source pare-feu, et tout autre
+message (DHCP, résolveur…) partirait en file de rejet.
 
 ```bash
 docker run -d --name baolsec-syslog-collector -p 514:514/udp -p 514:514/tcp \

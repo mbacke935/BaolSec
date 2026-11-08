@@ -4,7 +4,7 @@
     "version": "9.5.0"
   },
   "event": {
-    "id": "e9ae05322f117889bf21fe7efaa6ca04bb50adf4d37f136731b0690dc48b2662",
+    "id": "c2af620afd5eaa5b5e3e99de69d5829a62468a527824466b885e7124158b060a",
     "kind": "event",
     "category": [
       "authentication"
@@ -16,7 +16,7 @@
     "outcome": "failure",
     "provider": "portal-api",
     "dataset": "app.log",
-    "original": "{\"ts\":\"2026-11-02T10:31:04Z\",\"event\":\"login_failed\",\"client_ip\":\"10.0.8.31\",\"reason\":\"invalid_token\"}"
+    "original": "{\"ts\":\"2026-11-02T10:31:04Z\",\"app\":\"portal-api\",\"event\":\"login_failed\",\"client_ip\":\"10.0.8.31\",\"reason\":\"invalid_token\"}"
   },
   "host": {
     "name": "web-portal"
@@ -32,7 +32,7 @@
       "web-portal"
     ]
   },
-  "message": "Connexion à l'API refusée (jeton invalide) depuis 10.0.8.31",
+  "message": "Connexion à l'API refusée (invalid_token) depuis 10.0.8.31",
   "baolsec": {
     "contract": "normalized_event/v1",
     "source": {

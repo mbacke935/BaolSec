@@ -1,0 +1,16 @@
+{
+  "contract": "raw_event/v1",
+  "event_id": "c2af620afd5eaa5b5e3e99de69d5829a62468a527824466b885e7124158b060a",
+  "source": {
+    "id": "c4d5e6f7-a8b9-4c0d-8e1f-2a3b4c5d6e74",
+    "type": "http",
+    "ingestion_mode": "direct"
+  },
+  "transport": "https",
+  "received_at": "2026-11-02T10:31:04.620Z",
+  "agent": {
+    "name": "fluent-bit"
+  },
+  "payload_format": "text",
+  "payload": "{\"ts\":\"2026-11-02T10:31:04Z\",\"app\":\"portal-api\",\"event\":\"login_failed\",\"client_ip\":\"10.0.8.31\",\"reason\":\"invalid_token\"}"
+}

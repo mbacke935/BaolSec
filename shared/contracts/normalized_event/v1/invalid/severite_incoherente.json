@@ -1,5 +1,5 @@
 {
-  "@timestamp": "2026-11-02T10:40:52.318Z",
+  "@timestamp": "2026-11-02T10:40:52Z",
   "ecs": {
     "version": "9.5.0"
   },
@@ -17,7 +17,7 @@
     "code": "4625",
     "provider": "Microsoft-Windows-Security-Auditing",
     "dataset": "windows.security",
-    "original": "{\"EventID\": 4625, \"Computer\": \"PC-WIN-COMPTA\", \"Channel\": \"Security\", \"ProviderName\": \"Microsoft-Windows-Security-Auditing\", \"EventRecordID\": 1847263, \"TimeCreated\": \"2026-11-02T10:40:52.318Z\", \"TargetUserName\": \"admin\", \"IpAddress\": \"10.0.4.23\", \"IpPort\": \"51240\", \"LogonType\": \"3\", \"FailureReason\": \"%%2313\"}"
+    "original": "{\"EventID\": 4625, \"Computer\": \"PC-WIN-COMPTA\", \"Channel\": \"Security\", \"ProviderName\": \"Microsoft-Windows-Security-Auditing\", \"EventRecordID\": 1847263, \"TimeCreated\": \"2026-11-02 10:40:52 +0000\", \"Level\": 0, \"Task\": 12544, \"Keywords\": \"0x8010000000000000\", \"Message\": \"Échec d'ouverture de session d'un compte.\", \"EventData\": {\"SubjectUserSid\": \"S-1-0-0\", \"SubjectUserName\": \"-\", \"TargetUserName\": \"admin\", \"TargetDomainName\": \"PC-WIN-COMPTA\", \"Status\": \"0xc000006d\", \"FailureReason\": \"%%2313\", \"SubStatus\": \"0xc000006a\", \"LogonType\": \"3\", \"LogonProcessName\": \"NtLmSsp\", \"AuthenticationPackageName\": \"NTLM\", \"WorkstationName\": \"KALI\", \"IpAddress\": \"10.0.4.23\", \"IpPort\": \"51240\"}}"
   },
   "user": {
     "name": "admin"

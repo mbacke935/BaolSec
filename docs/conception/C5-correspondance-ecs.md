@@ -31,7 +31,7 @@ Ce document applique l'ADR 0001 (`docs/decisions/0001-schema-commun-ecs.md`). Il
 | — | `baolsec.severity.label` | keyword | normalization-worker | `info`, `faible`, `moyenne`, `elevee`, `critique`. |
 | — | `baolsec.severity.score` | byte | normalization-worker | 0 (info) à 4 (critique). |
 | user_name | `user.name` | keyword | normalization-worker | Compte concerné par l'événement (section 2). Renseigné dès que la source fournit une identité ; absent sinon, sans rendre l'événement invalide. |
-| host_name | `host.name` | keyword | normalization-worker | Machine où l'événement a été enregistré. Pour un pare-feu : `observer.name`. |
+| host_name | `host.name` | keyword | normalization-worker | Machine où l'événement a été enregistré ; si le journal ne la nomme pas, `config.sources.host` (enrichissement). Pour un pare-feu : `observer.name`. |
 | src_ip | `source.ip` | ip | normalization-worker | |
 | — | `source.port` | long | normalization-worker | Si fourni. |
 | dst_ip | `destination.ip` | ip | normalization-worker | Si fourni. |
@@ -53,16 +53,16 @@ Ce document applique l'ADR 0001 (`docs/decisions/0001-schema-commun-ecs.md`). Il
 |---|---|---|---|---|
 | `@timestamp` | Horodatage Syslog ou `__REALTIME_TIMESTAMP` journald | `TimeCreated` | Horodatage Syslog (pfSense) ; horodatage du journal noyau (iptables) | `$time_local` ; champ horaire du JSON |
 | `event.code` | absent | `EventID` (4624, 4625, 4688…) | absent | absent |
-| `event.provider` | nom du programme (`sshd`, `sudo`) | `Microsoft-Windows-Security-Auditing` | `filterlog` (pfSense) ; `kernel` (iptables) | nom du serveur web ou de l'application |
+| `event.provider` | nom du programme (`sshd`, `sudo`) | `Microsoft-Windows-Security-Auditing` | `filterlog` (pfSense) ; `kernel` (iptables) | absent (format combined) ; champ `app` ou `service` du JSON |
 | `event.dataset` | `linux.auth` | `windows.security` | `pfsense.filterlog` ; `iptables.log` | `web.access` ; `app.log` |
 | `user.name` | Compte cité (`Failed password for admin`) | `TargetUserName` (4624, 4625) ; `SubjectUserName` (4688) | absent | `$remote_user` (si authentifié) ; champ utilisateur du JSON |
-| `host.name` | `HOSTNAME` Syslog / `_HOSTNAME` journald | `Computer` | n/a (voir `observer.name`) | Nom du serveur (configuration de l'agent) |
-| `observer.name` / `.vendor` / `.product` / `.type` | n/a | n/a | Nom du pare-feu ; `Netgate` / `pfSense` / `firewall` (pfSense) ; nom de la machine / — / `iptables` / `firewall` (iptables) | n/a |
+| `host.name` | `HOSTNAME` Syslog / `_HOSTNAME` journald | `Computer` | n/a (voir `observer.name`) | `config.sources.host` (enrichissement) |
+| `observer.name` / `.vendor` / `.product` / `.type` | n/a | n/a | Nom d'hôte de l'en-tête Syslog, à défaut `config.sources.host` ; `Netgate` / `pfSense` / `firewall` (pfSense) ; nom de la machine / — / `iptables` / `firewall` (iptables) | n/a |
 | `source.ip` | Adresse après `from` | `IpAddress` (4624, 4625) ; absent (4688) | Adresse source (`filterlog`) ; `SRC=` (iptables) | `$remote_addr` ; champ IP client du JSON |
 | `source.port` | Port après `port` | `IpPort` | Port source ; `SPT=` | absent |
 | `destination.ip` | absent | absent | Adresse destination ; `DST=` | absent |
 | `destination.port` | absent | absent | Port destination ; `DPT=` | absent |
-| `network.transport` | n/a | n/a | Protocole (`tcp`, `udp`, `icmp`) ; `PROTO=` | n/a |
+| `network.transport` | n/a | n/a | Protocole (`tcp`, `udp`, `icmp` ; ICMPv6 noté `icmp`) ; `PROTO=` | n/a |
 | `network.direction` | n/a | n/a | `in` → `ingress`, `out` → `egress` (pfSense) ; interface `IN=`/`OUT=` (iptables) | n/a |
 | `rule.id` | n/a | n/a | Numéro de règle du pare-feu (pfSense) ; préfixe `LOG` configuré (iptables) | n/a |
 | `process.name` / `process.pid` | Programme et PID Syslog (`sshd[1842]`) | — / `NewProcessId` (4688) | n/a | absent |
@@ -87,21 +87,31 @@ Les catégories et types sont pris dans les listes autorisées d'ECS. `event.act
 | Linux | `Failed password for … from …` (sshd) | `authentication` | `start` | `ssh_login` | `failure` |
 | Linux | `Accepted password/publickey for …` (sshd) | `authentication` | `start` | `ssh_login` | `success` |
 | Linux | `Invalid user … from …` (sshd) | `authentication` | `start` | `ssh_login` | `failure` |
-| Linux | `sudo: … COMMAND=…` | `process` | `start` | `sudo_command` | `success` |
-| Linux | `authentication failure` (sudo / PAM) | `authentication` | `start` | `sudo_auth` | `failure` |
+| Linux | `sudo: … COMMAND=…` | `process` | `start` | `sudo_command` | `success` (`failure` si mot de passe incorrect ou commande refusée) |
+| Linux | `pam_unix(sudo:auth): authentication failure` | `authentication` | `start` | `sudo_auth` | `failure` |
+| Linux | `authentication failure` d'un autre service PAM (sshd, login…) | `authentication` | `start` | `pam_auth` | `failure` |
 | Windows | 4624 — ouverture de session réussie | `authentication` | `start` | `logon` | `success` |
 | Windows | 4625 — échec d'ouverture de session | `authentication` | `start` | `logon` | `failure` |
 | Windows | 4634 — fermeture de session | `authentication` | `end` | `logoff` | `success` |
 | Windows | 4688 — création de processus | `process` | `start` | `process_start` | `success` |
 | Pare-feu | Paquet autorisé (`pass` / préfixe d'acceptation) | `network` | `connection`, `allowed` | `connection_allowed` | `unknown` |
-| Pare-feu | Paquet bloqué (`block` / préfixe de rejet) | `network` | `connection`, `denied` | `connection_denied` | `unknown` |
+| Pare-feu | Paquet bloqué (`block`, `reject` / préfixe de rejet) | `network` | `connection`, `denied` | `connection_denied` | `unknown` |
+| Pare-feu | Préfixe iptables sans décision (ni DROP, REJECT, BLOCK, DENY, ni ACCEPT, ALLOW, PASS) | `network` | `connection` | `connection_logged` | `unknown` |
 | Web | Requête avec statut < 400 | `web` | `access` | `http_request` | `success` |
 | Web | Requête avec statut ≥ 400 | `web` | `access`, `error` | `http_request` | `failure` |
-| Application | Connexion à l'API (JSON) | `authentication` | `start` | `api_login` | `success` ou `failure` selon le JSON |
+| Application | Connexion à l'API (JSON : `login_succeeded`, `login_failed`…) | `authentication` | `start` | `api_login` | `success` ou `failure` selon le JSON |
 
 **Remarque sur le pare-feu.** La décision du pare-feu est portée par `event.type` (`allowed` / `denied`) et `event.action`. `event.outcome` vaut `unknown`, car un blocage est un succès du pare-feu mais un échec de la connexion : utiliser `failure` ou `success` serait ambigu pour les règles.
 
-Un événement que le parseur reconnaît mais qui n'est pas dans cette table reçoit `event.category` selon la source, `event.type: info` et `event.action` dérivé du programme ; un événement que le parseur ne sait pas lire part en file de rejet (C3 W2).
+Un événement que le parseur reconnaît mais qui n'est pas dans cette table est conservé sans interprétation : `event.type: info`, `event.outcome: unknown`, et
+
+| Source | `event.category` | `event.action` |
+|---|---|---|
+| Linux | `host` | nom du programme (`cron`, `ftpd`…) |
+| Windows | `host` | `windows_<EventID>` (ex. `windows_4672`) |
+| Application | `web` | nom de l'événement du JSON |
+
+Un événement que le parseur ne sait pas lire part en file de rejet dès la première tentative (`parse_error`, C3 W2). Pour une source pare-feu, seuls les messages `filterlog` (et les lignes du pare-feu Linux) sont attendus : pfSense est configuré pour n'envoyer que les événements du pare-feu.
 
 ---
 
@@ -112,10 +122,11 @@ Un événement que le parseur reconnaît mais qui n'est pas dans cette table re�
 | Linux | `log.syslog.severity.code` (0 à 7) | 0–2 → `critique` (4) ; 3 → `elevee` (3) ; 4 → `moyenne` (2) ; 5 → `faible` (1) ; 6–7 → `info` (0) |
 | Windows | absente | Selon l'événement : 4625 → `faible` (1) ; 4624, 4634, 4688 → `info` (0) |
 | Pare-feu | `log.syslog.severity.code` si présent | Selon la décision : `connection_denied` → `faible` (1) ; `connection_allowed` → `info` (0). La sévérité Syslog n'est pas utilisée, car elle décrit le message et non le risque. |
-| Web | `log.level` (JSON) ; absente (combined) | Statut 5xx → `moyenne` (2) ; 4xx → `faible` (1) ; autres → `info` (0) ; pour le JSON : `ERROR` → `moyenne`, `WARN` → `faible`, autres → `info` |
+| Web | `log.level` (JSON) ; absente (combined) | Statut 5xx → `moyenne` (2) ; 4xx → `faible` (1) ; autres → `info` (0) ; pour le JSON : `ERROR` → `moyenne`, `WARN` → `faible`, autres → `info` ; sans niveau, une connexion à l'API refusée → `faible` (1) |
 
 - `event.severity` n'est renseigné que si une source fournit une échelle numérique propre ; aucune des quatre sources du prototype ne le fait, il reste donc absent. La valeur native Syslog est rangée dans `log.syslog.severity.code`, comme ECS le prévoit.
-- Ces conversions sont des **valeurs proposées**, paramétrables, et seront ajustées après les tests (C24 à C28).
+- Ces conversions sont des **valeurs proposées**, réunies dans `services/normalization-worker/src/normalizer/severity.py`, et seront ajustées après les tests (C24 à C28).
+- Le pare-feu Linux (iptables) suit la règle du pare-feu : `connection_denied` → `faible`, sinon `info`.
 - La sévérité d'une **alerte** ne vient pas de l'événement : elle est fixée par la règle de détection (section 6).
 
 ---
@@ -161,7 +172,17 @@ Dans un **événement** de pare-feu, `rule.id` désigne la règle du pare-feu ; 
 
 ---
 
-## 7. Décisions validées
+## 7. Horodatage
+
+- `@timestamp` : heure d'origine de l'événement (`baolsec.timestamp_source: original`) ; si la source n'en fournit pas de lisible, heure de réception par la passerelle (`received`).
+- Syslog RFC 3164 (sans année ni fuseau, cas de pfSense et de l'ancien format d'auth.log) : fuseau configuré (`NORMALIZER_SYSLOG_TIMEZONE`, UTC par défaut, qui est l'heure du Sénégal) ; année de la réception, ou l'année précédente si la date obtenue dépasse la réception de plus de 2 jours (ligne de décembre reçue en janvier).
+- ISO 8601 (auth.log d'Ubuntu 24.04), RFC 5424 (pfSense en format « syslog ») et Windows (`TimeCreated`) : fuseau fourni par la source.
+- journald : `_SOURCE_REALTIME_TIMESTAMP`, sinon l'heure de l'entrée du journal transmise par l'agent.
+- `event.created` : heure de lecture par l'agent ou le collecteur (`agent.read_at`), si elle est fournie.
+
+---
+
+## 8. Décisions validées
 
 1. Vocabulaire `event.action` de la section 3 ; pour le pare-feu, `event.outcome: unknown` et décision portée par `event.type`.
 2. Conversions de sévérité de la section 4 (valeurs de départ, ajustables après les tests).

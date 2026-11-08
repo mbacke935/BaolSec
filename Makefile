@@ -1,4 +1,4 @@
-.PHONY: help up down test broker-up broker-init broker-restart broker-reset test-broker bench-broker gateway-dev gateway-up test-gateway agents-up agents-check test-agents
+.PHONY: help up down test broker-up broker-init broker-restart broker-reset test-broker bench-broker gateway-dev gateway-up test-gateway agents-up agents-check test-agents normalizer-up test-normalizer fetch-datasets bench-normalizer
 
 COMPOSE = docker compose --env-file .env -f infrastructure/compose/compose.yaml
 # Depuis la machine hôte, le broker est joint par le port publié sur 127.0.0.1.
@@ -22,6 +22,10 @@ help:
 	@echo "make agents-up      : passerelle + agent Fluent Bit de test + collecteur Syslog"
 	@echo "make agents-check   : syntaxe des configurations des agents et du collecteur"
 	@echo "make test-agents    : coupure réseau puis reconnexion, comptage avant/après (C7)"
+	@echo "make normalizer-up  : passerelle + normalisation et enrichissement (C9, C10)"
+	@echo "make fetch-datasets : télécharger les journaux publics de test (test-data/public)"
+	@echo "make test-normalizer: tests unitaires, jeux publics et intégration de la normalisation"
+	@echo "make bench-normalizer : débit de la normalisation (ENF-02)"
 
 up:
 	$(COMPOSE) up -d
@@ -30,7 +34,7 @@ down:
 	$(COMPOSE) down
 
 test:
-	@for s in services/*/; do (cd $$s && python -m pytest -q; r=$$?; [ $$r -eq 0 ] || [ $$r -eq 5 ]) || exit 1; done
+	@for s in services/*/; do (cd $$s && uv run --quiet --extra dev pytest -q -o asyncio_default_fixture_loop_scope=function; r=$$?; [ $$r -eq 0 ] || [ $$r -eq 5 ]) || exit 1; done
 	$(UV_TEST) pytest -q -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function shared/python-common/tests
 
 broker-up:
@@ -89,3 +93,17 @@ agents-check:
 
 test-agents:
 	$(WITH_ENV) $(UV_TEST) pytest -v -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests/integration/agents
+
+normalizer-up: gateway-up
+	$(COMPOSE) up -d --build --wait normalization-worker
+
+fetch-datasets:
+	bash scripts/testing/fetch_public_datasets.sh
+
+test-normalizer:
+	cd services/normalization-worker && uv run --extra dev pytest -q -s -o asyncio_default_fixture_loop_scope=function
+	$(WITH_ENV) $(UV_TEST) --with-editable services/normalization-worker --with httpx==0.28.1 \
+	  pytest -v -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests/integration/normalizer
+
+bench-normalizer:
+	$(WITH_ENV) uv run --with nats-py==2.16.0 scripts/testing/bench_normalizer.py 20000

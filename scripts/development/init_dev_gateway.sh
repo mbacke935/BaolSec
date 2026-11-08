@@ -71,14 +71,15 @@ def fingerprint(path):
     return hashlib.sha256(der).hexdigest()
 
 tokens, sources = {}, []
-for name, stype, var in [("dev-linux", "linux", "DEV_TOKEN_LINUX"),
-                         ("dev-windows", "windows", "DEV_TOKEN_WINDOWS"),
-                         ("dev-webapp", "http", "DEV_TOKEN_WEBAPP"),
-                         ("dev-pfsense", "firewall", "DEV_TOKEN_PFSENSE")]:
+# host et criticality : colonnes de config.sources lues par l'enrichissement (C10)
+for name, stype, var, host, crit in [("dev-linux", "linux", "DEV_TOKEN_LINUX", "srv-test", "moyenne"),
+                                     ("dev-windows", "windows", "DEV_TOKEN_WINDOWS", "pc-dev-windows", "faible"),
+                                     ("dev-webapp", "http", "DEV_TOKEN_WEBAPP", "web-dev", "elevee"),
+                                     ("dev-pfsense", "firewall", "DEV_TOKEN_PFSENSE", "fw-edge-01", "critique")]:
     token = "bsk_" + secrets.token_urlsafe(32)
     tokens[var] = token
     sources.append({"id": str(uuid.uuid4()), "name": name, "source_type": stype, "transport": "https",
-                    "ingestion_mode": "direct", "is_enabled": True,
+                    "ingestion_mode": "direct", "host": host, "criticality": crit, "is_enabled": True,
                     "credentials": [{"credential_type": "token",
                                      "secret_hash": hashlib.sha256(token.encode()).hexdigest()}]})
 sources.append({"id": str(uuid.uuid4()), "name": "dev-syslog-direct", "source_type": "firewall", "transport": "syslog",

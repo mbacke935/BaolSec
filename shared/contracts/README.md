@@ -30,6 +30,9 @@ uv run --with jsonschema --with rfc3339-validator scripts/testing/validate_contr
 ```
 
 Chaque exemple de `examples/` doit être accepté, chaque fichier de `invalid/` rejeté.
+Chaque exemple brut de `raw_event/v1/examples/` a un exemple normalisé du même nom : le service de
+normalisation doit produire exactement celui-ci (`services/normalization-worker/tests/test_contrats.py`).
+L'exemple Windows reproduit la forme envoyée par l'agent (entrée winevtlog de Fluent Bit, `EventData` nommé).
 
 ## Règles communes
 

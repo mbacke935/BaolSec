@@ -26,10 +26,11 @@ CREATE TYPE config.source_type AS ENUM ('linux', 'windows', 'firewall', 'http');
 CREATE TYPE config.transport AS ENUM ('https', 'syslog');
 CREATE TYPE config.ingestion_mode AS ENUM ('direct', 'rejeu');
 CREATE TYPE config.credential_type AS ENUM ('token', 'client_cert');
+CREATE TYPE config.criticality AS ENUM ('faible', 'moyenne', 'elevee', 'critique');
 CREATE TABLE config.sources (
   id uuid PRIMARY KEY, name text NOT NULL UNIQUE, source_type config.source_type NOT NULL,
   transport config.transport NOT NULL, ingestion_mode config.ingestion_mode NOT NULL DEFAULT 'direct',
-  host text, silence_threshold_s integer NOT NULL DEFAULT 600, expected_min_events_per_h integer,
+  host text, criticality config.criticality, silence_threshold_s integer NOT NULL DEFAULT 600, expected_min_events_per_h integer,
   is_enabled boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE config.source_credentials (

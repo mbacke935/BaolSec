@@ -4,7 +4,9 @@
     await process(msg, handler, policy)
 
 - Succès : le message est acquitté après le retour du handler (I-8).
-- Échec avant la dernière tentative : nouvelle livraison après le délai du palier.
+- Échec définitif (ProcessingError(..., permanent=True) : message illisible, non conforme…) :
+  le message part tout de suite dans la dlq, car une nouvelle tentative donnerait le même résultat.
+- Échec passager avant la dernière tentative : nouvelle livraison après le délai du palier.
 - Échec à la dernière tentative : publication d'un dlq_message/v1, attente de la
   confirmation, puis acquittement de l'original. Si la dlq est injoignable, le message
   n'est pas acquitté et sera relivré.
@@ -34,13 +36,17 @@ REASON_CODES = {"parse_error", "validation_error", "mapping_error", "index_rejec
 
 
 class ProcessingError(Exception):
-    """Échec de traitement avec un motif du contrat dlq_message/v1."""
+    """Échec de traitement avec un motif du contrat dlq_message/v1.
 
-    def __init__(self, reason_code: str, reason: str):
+    permanent=True : l'échec ne dépend que du contenu du message (même résultat à chaque essai).
+    """
+
+    def __init__(self, reason_code: str, reason: str, permanent: bool = False):
         if reason_code not in REASON_CODES:
             raise ValueError(f"reason_code inconnu : {reason_code}")
         super().__init__(reason)
         self.reason_code = reason_code
+        self.permanent = permanent
 
 
 @dataclass(frozen=True)
@@ -100,7 +106,7 @@ async def process(
     try:
         await handler(msg)
     except Exception as exc:
-        if msg.delivery_count < policy.max_deliver:
+        if msg.delivery_count < policy.max_deliver and not getattr(exc, "permanent", False):
             delay = policy.delay(msg.delivery_count)
             log.warning("échec %s (tentative %d), nouvelle livraison dans %ss : %s",
                         msg.msg_id, msg.delivery_count, delay, exc)
@@ -116,7 +122,7 @@ async def process(
         except BrokerUnavailable:
             log.error("dlq injoignable, %s non acquitté", msg.msg_id)
             return "retry"
-        log.error("abandon de %s après %d tentatives : %s", msg.msg_id, msg.delivery_count, exc)
+        log.error("abandon de %s après %d tentative(s) : %s", msg.msg_id, msg.delivery_count, exc)
         await msg.ack()
         return "dlq"
     await msg.ack()

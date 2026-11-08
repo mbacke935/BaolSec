@@ -99,3 +99,24 @@ async def test_contenu_binaire_et_trop_long():
     assert len(long["payload"]) == 131072 and long["reason"].endswith("(contenu tronqué)")
     for _, dlq, _ in pub.sent:
         assert sorted(VALIDATOR.iter_errors(dlq), key=str) == []
+
+
+async def permanent_boom(_msg):
+    raise ProcessingError("parse_error", "format inconnu", permanent=True)
+
+
+async def test_echec_definitif_part_en_dlq_des_la_premiere_tentative():
+    pub = FakePublisher()
+    msg = FakeMessage(b"ligne illisible", delivery_count=1)
+    assert await process(msg, permanent_boom, policy(pub)) == "dlq"
+    assert msg.calls == [("ack",)]
+    subject, dlq, _ = pub.sent[0]
+    assert subject == "dlq.normalization-worker"
+    assert dlq["attempts"] == 1 and dlq["reason_code"] == "parse_error"
+    VALIDATOR.validate(dlq)
+
+
+async def test_echec_definitif_sans_dlq_joignable_non_acquitte():
+    msg = FakeMessage(b"ligne illisible", delivery_count=1)
+    assert await process(msg, permanent_boom, policy(FakePublisher(fail=True))) == "retry"
+    assert msg.calls == []

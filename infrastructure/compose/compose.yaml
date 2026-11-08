@@ -68,6 +68,39 @@ services:
     restart: unless-stopped
     networks: [internal]
 
+  normalization-worker:
+    build:
+      context: ../..
+      dockerfile: services/normalization-worker/Dockerfile
+    environment:
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+      # Référentiel des sources (enrichissement, C10) : même fichier que la passerelle tant que
+      # PostgreSQL n'est pas déployé, puis NORMALIZER_SOURCE_REGISTRY=postgres et NORMALIZER_POSTGRES_DSN
+      # (compte svc_normalisation, lecture seule).
+      NORMALIZER_SOURCE_REGISTRY: file
+      NORMALIZER_SOURCES_FILE: /run/baolsec/dev/sources.json
+      NORMALIZER_SOURCES_REFRESH_S: "5"
+      NORMALIZER_SYSLOG_TIMEZONE: ${NORMALIZER_SYSLOG_TIMEZONE:-UTC}
+      NORMALIZER_INTERNAL_NETWORKS: ${NORMALIZER_INTERNAL_NETWORKS:-}
+    volumes:
+      - ../tls/dev:/run/baolsec/dev:ro
+    depends_on:
+      broker:
+        condition: service_healthy
+      broker-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    # Pas de port publié : le service ne fait que lire et écrire dans le broker.
+    # Plusieurs instances se partagent le flux : docker compose up -d --scale normalization-worker=2
+    restart: unless-stopped
+    stop_grace_period: 20s     # termine le lot en cours avant l'arrêt
+    networks: [internal]
+
   # --- Collecte (C7) : services de test, démarrés avec le profil « agents-test » -------------
   agent-test:
     profiles: ["agents-test"]

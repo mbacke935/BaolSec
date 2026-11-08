@@ -4,7 +4,7 @@
     "version": "9.5.0"
   },
   "event": {
-    "id": "86de4684ad840bb2414b900094b821ffe5f1f4be9eb2c85377d6bae63ae14472",
+    "id": "3a965fc95c942824faadbeacc338125ef665d74856345f8371716b1efd4c18f6",
     "kind": "event",
     "category": [
       "network"
@@ -17,6 +17,7 @@
     "outcome": "unknown",
     "provider": "filterlog",
     "dataset": "pfsense.filterlog",
+    "created": "2026-11-02T10:27:56.180Z",
     "original": "<134>Nov  2 10:27:56 fw-edge-01 filterlog[3012]: 5,,,1000000103,em0,match,block,out,4,0x0,,64,0,0,DF,6,tcp,60,10.0.2.47,45.33.10.2,49822,443,0,S,1234567890,,64240,,mss"
   },
   "observer": {
@@ -56,7 +57,7 @@
       "fw-edge-01"
     ]
   },
-  "message": "Connexion TCP bloquée de 10.0.2.47 vers 45.33.10.2:443",
+  "message": "Connexion TCP bloquée de 10.0.2.47 vers 45.33.10.2:443 (interface em0)",
   "baolsec": {
     "contract": "normalized_event/v1",
     "source": {

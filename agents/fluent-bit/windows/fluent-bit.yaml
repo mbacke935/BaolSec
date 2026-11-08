@@ -25,5 +25,9 @@ pipeline:
       channels: Security
       interval_sec: 1
       read_existing_events: false
+      # Données de l'événement nommées (EventData.TargetUserName, IpAddress…) plutôt qu'une liste
+      # par position ; si Windows ne fournit pas la description, Fluent Bit envoie StringInserts.
+      event_data_as_map: true
+      string_inserts: false
       db: ${BAOLSEC_STATE_DIR}/winevtlog.db
       storage.type: filesystem
