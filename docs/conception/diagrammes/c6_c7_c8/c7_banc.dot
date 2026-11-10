@@ -1,0 +1,25 @@
+digraph B {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Banc d'essai des coupures (make test-agents)</b><br/> >, fontsize=22, dpi=200, nodesep=0.4, ranksep=0.7, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  node [shape=note, style=filled, fillcolor="#FAFAFA", color="#90A4AE"];
+  t [label="Script de test\ntest_collecte.py"];
+  node [shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0"];
+  ag [label="agent-test\n(Fluent Bit, tampon disque)"]; col [label="syslog-collector\n(Fluent Bit, tampon disque)"];
+  node [fillcolor="#ECEFF1", color="#78909C"]; gw [label="Passerelle"];
+  node [shape=cds, style=filled, fillcolor="#FFF8E1", color="#F57F17"]; raw [label="raw-events\n(le test compte les lignes\nmarquées et les doublons)"];
+  node [shape=cylinder]; log [label="auth-test.log"];
+  t -> log [label="écrit N lignes\nmarquées"]; t -> col [label="Syslog UDP\n(port 5514)"];
+  log -> ag [style=dashed, label="lecture"];
+  ag -> gw [label="réseau « internal »\n✂ coupé pendant l'essai", color="#C62828", fontcolor="#C62828", penwidth=1.6];
+  col -> gw [label="réseau « internal »\n✂ coupé pendant l'essai", color="#C62828", fontcolor="#C62828", penwidth=1.6];
+  gw -> raw [arrowhead=empty];
+
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein</td><td align="left">envoi (HTTPS vers la passerelle, UDP vers le collecteur)</td></tr>
+    <tr><td><font color="#C62828">trait rouge ✂</font></td><td align="left">liaison coupée puis rétablie par le test</td></tr>
+    <tr><td>tirets</td><td align="left">lecture du fichier par l'agent</td></tr>
+    <tr><td>pointe creuse</td><td align="left">publication asynchrone dans le broker</td></tr>
+  </table>>];
+  raw -> LEG [style=invis];
+}

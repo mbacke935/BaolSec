@@ -1,0 +1,28 @@
+digraph T {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Topologie du broker (infrastructure/broker/topology.json)</b><br/> >, fontsize=22, dpi=200, nodesep=0.35, ranksep=0.55, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F", arrowhead=empty, arrowsize=1.1];
+  node [shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#78909C"];
+  gw [label="ingestion-gateway"]; nw [label="normalization-worker"]; dw [label="detection-worker"];
+  ib [label="incident-builder"]; iw [label="indexing-worker"]; cw [label="coverage-worker"]; adm [label="Administrateur\n(API, GET /dlq)"];
+  node [shape=plain];
+  raw [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="5" color="#F57F17" bgcolor="#FFF8E1"><tr><td><b>RAW_EVENTS</b> (raw-events)</td></tr><tr><td align="left">conservé jusqu'à l'acquittement, 7 j max<br align="left"/>20 Gio, plein : refuse les nouveaux</td></tr></table>>];
+  norm [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="5" color="#F57F17" bgcolor="#FFF8E1"><tr><td><b>NORMALIZED_EVENTS</b></td></tr><tr><td align="left">7 jours ou 20 Gio</td></tr></table>>];
+  al [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="5" color="#F57F17" bgcolor="#FFF8E1"><tr><td><b>ALERTS</b></td></tr><tr><td align="left">7 jours ou 2 Gio</td></tr></table>>];
+  dlq [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="5" color="#C62828" bgcolor="#FFF8E1"><tr><td><b>DLQ</b> (dlq.&lt;service&gt;)</td></tr><tr><td align="left">30 jours ou 2 Gio,<br align="left"/>plein : refuse les nouveaux</td></tr></table>>];
+  kv [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="5" color="#F57F17" bgcolor="#FFF8E1"><tr><td><b>KV detection-state</b></td></tr><tr><td align="left">état des fenêtres de détection<br align="left"/>plafond 24 h par entrée</td></tr></table>>];
+  gw -> raw; raw -> nw [label="normalization"]; raw -> cw [label="coverage-raw"];
+  nw -> norm; norm -> dw [label="detection"]; norm -> iw [label="indexing-events"]; norm -> cw [label="coverage-normalized"];
+  dw -> al; al -> ib [label="incident-builder"]; al -> iw [label="indexing-alerts"];
+  edge [arrowhead=normal, style=dashed]; dw -> kv [label="lecture et écriture\nconditionnelle"];
+  edge [style=dotted, color="#C62828", arrowhead=empty]; {gw nw dw ib iw} -> dlq;
+  edge [style=dashed, color="#37474F", arrowhead=normal]; adm -> dlq [label="lecture"];
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein, pointe creuse</td><td align="left">publication ou livraison asynchrone ; l'étiquette nomme le consommateur durable</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">mise en file de rejet</td></tr>
+    <tr><td>tirets</td><td align="left">accès au stockage clé-valeur, ou lecture de la file de rejet</td></tr>
+    <tr><td bgcolor="#FFF8E1">jaune</td><td align="left">flux ou bucket conservé sur disque (stockage file)</td></tr>
+    <tr><td bgcolor="#ECEFF1">gris</td><td align="left">services producteurs et consommateurs</td></tr>
+  </table>>];
+  dlq -> LEG [style=invis];
+}

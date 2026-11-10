@@ -1,0 +1,37 @@
+{
+  "id": "AUTH-001",
+  "name": "Force brute sur un compte",
+  "description": "Échecs d'authentification répétés pour un même couple utilisateur et IP source.",
+  "severity": "elevee",
+  "type": "window",
+  "category": [
+    "authentication"
+  ],
+  "match": {
+    "event.category": "authentication",
+    "event.outcome": "failure"
+  },
+  "group_by": [
+    "user.name",
+    "source.ip"
+  ],
+  "window": "10m",
+  "threshold": 5,
+  "message": "{count} échecs d'authentification en {window} pour {user.name} depuis {source.ip}",
+  "requires": [
+    {
+      "source_type": "linux",
+      "fields": [
+        "user.name",
+        "source.ip"
+      ]
+    },
+    {
+      "source_type": "windows",
+      "fields": [
+        "user.name",
+        "source.ip"
+      ]
+    }
+  ]
+}

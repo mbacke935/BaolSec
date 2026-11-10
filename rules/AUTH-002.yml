@@ -1,0 +1,26 @@
+# Échecs d'authentification suivis d'un succès : compromission probable.
+# Opérateur clé : followed_by (le succès déclenche l'alerte seulement si le seuil d'échecs est atteint).
+id: AUTH-002
+name: Compromission probable après force brute
+description: >
+  Plusieurs échecs d'authentification suivis d'un succès pour le même couple utilisateur + IP.
+  Indique qu'un attaquant a peut-être trouvé le mot de passe après une série de tentatives.
+severity: critique
+type: window
+category: [authentication]
+match:
+  event.category: authentication
+  event.outcome: failure
+group_by: [user.name, source.ip]
+window: 10m
+threshold: 5
+followed_by:
+  match:
+    event.category: authentication
+    event.outcome: success
+message: "{count} échecs puis un succès en {window} pour {user.name} depuis {source.ip}"
+requires:
+  - source_type: linux
+    fields: [user.name, source.ip]
+  - source_type: windows
+    fields: [user.name, source.ip]

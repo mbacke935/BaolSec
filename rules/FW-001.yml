@@ -1,0 +1,20 @@
+# Blocages pare-feu répétés depuis une même IP : reconnaissance ou attaque persistante.
+# Seuil simple sur une fenêtre de 5 minutes.
+id: FW-001
+name: Blocages pare-feu répétés
+description: >
+  Le pare-feu bloque de nombreuses connexions depuis la même adresse source en peu de temps.
+  Peut indiquer une tentative de reconnaissance ou une attaque persistante.
+severity: moyenne
+type: window
+category: [network]
+match:
+  event.category: network
+  event.outcome: failure
+group_by: [source.ip]
+window: 5m
+threshold: 20
+message: "{count} connexions bloquées en {window} depuis {source.ip}"
+requires:
+  - source_type: firewall
+    fields: [source.ip]

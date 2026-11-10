@@ -3,7 +3,8 @@
 L'adaptateur concret s'importe explicitement :
     from baolsec_common.messaging.nats_adapter import NatsBroker
 """
-from .interfaces import Broker, BrokerUnavailable, PublishResult, Publisher, ReceivedMessage, Subscription
+from .interfaces import (Broker, BrokerUnavailable, PublishResult, Publisher, ReceivedMessage, StateConflict, StateEntry,
+                         StateStore, Subscription)
 from .retry import ProcessingError, RetryPolicy, build_dlq_message, process
 
 __all__ = [
@@ -13,6 +14,9 @@ __all__ = [
     "PublishResult",
     "Publisher",
     "ReceivedMessage",
+    "StateConflict",
+    "StateEntry",
+    "StateStore",
     "RetryPolicy",
     "Subscription",
     "build_dlq_message",

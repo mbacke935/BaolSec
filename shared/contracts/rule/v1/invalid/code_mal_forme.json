@@ -1,0 +1,13 @@
+{
+  "id": "auth-1",
+  "name": "Code mal formé",
+  "severity": "faible",
+  "type": "simple",
+  "category": [
+    "authentication"
+  ],
+  "match": {
+    "event.outcome": "failure"
+  },
+  "message": "xyz"
+}

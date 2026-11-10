@@ -56,3 +56,33 @@ class Broker(Publisher, Protocol):
         """Se rattache à un consommateur durable existant (créé par init_broker.py)."""
 
     async def close(self) -> None: ...
+
+
+class StateConflict(Exception):
+    """Écriture conditionnelle refusée : l'entrée a changé depuis sa lecture (autre instance)."""
+
+
+@dataclass(frozen=True)
+class StateEntry:
+    key: str
+    value: bytes
+    revision: int
+
+
+class StateStore(Protocol):
+    """Stockage clé-valeur à écriture conditionnelle (KV du broker, C14).
+
+    Une entrée expire après son délai de vie, compté depuis sa dernière écriture.
+    """
+
+    async def get(self, key: str) -> StateEntry | None:
+        """Entrée courante, ou None si elle n'existe pas ou a expiré."""
+
+    async def put(self, key: str, value: bytes, expected_revision: int, ttl_s: float) -> int:
+        """Écrit si la révision courante vaut expected_revision (0 : l'entrée ne doit pas exister).
+
+        Renvoie la nouvelle révision. Lève StateConflict, ou BrokerUnavailable.
+        """
+
+    async def scan(self) -> list[StateEntry]:
+        """Toutes les entrées présentes (contrôles périodiques, tests)."""

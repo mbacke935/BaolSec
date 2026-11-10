@@ -1,0 +1,23 @@
+@startuml c11_etats
+!include _style.iuml
+title Cycle de vie d'un message pour un consommateur durable (C11)
+[*] --> EN_ATTENTE : publié dans le flux (PubAck)
+EN_ATTENTE --> LIVRE : demandé par une instance (pull)
+LIVRE --> ACQUITTE : traitement réussi,\neffets confirmés, puis ack
+LIVRE --> EN_ATTENTE : échec passager, tentative 1 à 4\n(nak avec délai 5, 15, 30 ou 60 s)
+LIVRE --> EN_ATTENTE : pas de réponse avant le délai\n(service arrêté, broker coupé)
+LIVRE --> EN_DLQ : échec à la 5e tentative ou au-delà,\nou échec définitif dès la 1re\n(rejet confirmé, puis ack)
+EN_DLQ --> EN_ATTENTE : reprise par dlq_admin.py replay\n(nouveau message, même event_id)
+EN_DLQ --> SUPPRIME : purge par l'exploitant\nou 30 jours écoulés
+ACQUITTE --> [*]
+SUPPRIME --> [*]
+EN_ATTENTE : livraisons sans limite côté broker ;\nles tentatives sont comptées par le code commun
+EN_DLQ : flux DLQ, conservé 30 jours ;\nfile pleine : rejet refusé, le message\nreste dans son flux d'origine
+legend bottom left
+  |= Notation |= Signification |
+  | disque plein | point de départ (message stocké dans le flux) |
+  | cercle cerclé | fin du traitement pour ce consommateur |
+  | rectangle arrondi | état du message |
+  | flèche pleine | transition, avec l'événement qui la déclenche |
+endlegend
+@enduml

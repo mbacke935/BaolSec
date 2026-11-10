@@ -1,0 +1,36 @@
+digraph P {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Place du moteur de détection</b><br/> >, fontsize=22, dpi=200, nodesep=0.6, ranksep=0.55, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0"];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  norm [label="normalization-worker\n(C9, C10)"];
+  ne [label="normalized-events", shape=cylinder, fillcolor="#E8F5E9", color="#2E7D32"];
+  det [label="detection-worker\n(C12, C14)\nplusieurs instances", fillcolor="#BBDEFB", penwidth=2];
+  kv [label="KV detection-state\nétat des fenêtres,\nalertes en attente", shape=cylinder, fillcolor="#FFF8E1", color="#F57F17"];
+  pg [label="PostgreSQL\nconfig.rules,\nrule_versions", shape=cylinder, fillcolor="#FFF8E1", color="#F57F17"];
+  load [label="make rules-load\n(puis API, C20)", fillcolor="#ECEFF1", color="#546E7A"];
+  yml [label="rules/*.yml\ncontrat rule/v1", shape=note, fillcolor="#FFFFFF", color="#90A4AE"];
+  al [label="alerts", shape=cylinder, fillcolor="#E8F5E9", color="#2E7D32"];
+  inc [label="incident-builder\n(C15, C16)", style="rounded,dashed,filled", fillcolor="#FFFFFF"];
+  idx [label="indexing-worker\n(C19)", style="rounded,dashed,filled", fillcolor="#FFFFFF"];
+  dlq [label="dlq", shape=cds, style=filled, fillcolor="#FFF8E1", color="#F57F17"];
+  norm -> ne [arrowhead=onormal, label="publication"];
+  ne -> det [arrowhead=onormal, label="livraison\n(consommateur detection)"];
+  yml -> load [arrowhead=normal];
+  load -> pg [arrowhead=normal, label="écriture"];
+  pg -> det [style=dashed, arrowhead=normal, label="lecture toutes les 30 s\n(svc_detection)"];
+  det -> kv [dir=both, arrowhead=normal, arrowtail=normal, label="lecture et écriture\nconditionnelle"];
+  det -> al [arrowhead=onormal, label="Msg-Id = alert_id"];
+  al -> inc [arrowhead=onormal, style=dashed]; al -> idx [arrowhead=onormal, style=dashed];
+  det -> dlq [style=dotted, color="#C62828", fontcolor="#C62828", arrowhead=onormal, label="illisible"];
+  LEG [shape=plain, fontsize=11, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>pointe ouverte</td><td align="left">message par le broker</td></tr>
+    <tr><td>pointe pleine</td><td align="left">appel, lecture ou écriture directe</td></tr>
+    <tr><td>tirets</td><td align="left">lecture seule, ou service d'une carte ultérieure</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">mise en file de rejet</td></tr>
+    <tr><td>cylindre jaune / vert</td><td align="left">stockage sur disque / flux du broker</td></tr>
+  </table>>];
+  {rank=same; kv; det; pg;}
+  {rank=same; norm; yml;}
+  dlq -> LEG [style=invis];
+}

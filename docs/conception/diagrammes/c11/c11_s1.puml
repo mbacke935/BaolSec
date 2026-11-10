@@ -1,0 +1,29 @@
+@startuml c11_s1
+!include _style.iuml
+title Scénario S1 : arrêt puis redémarrage du broker pendant l'envoi
+participant "Agent\n(Fluent Bit)" as A
+participant "Passerelle\nd'ingestion" as G
+database "Broker\n(raw-events)" as B
+participant "Normalisation" as N
+A -> G : POST /ingest (lot n)
+G ->> B : publication, Msg-Id = event_id
+B --> G : PubAck
+G --> A : 202
+note over B #FFEBEE : arrêt brutal du broker
+A -> G : POST /ingest (lot n+1)
+G ->> B : publication
+G --> A : 503 + Retry-After (délai dépassé)
+note over A : lot n+1 gardé dans le tampon disque
+note over N : connexion perdue, messages non acquittés
+note over B #E8F5E9 : redémarrage : flux et consommateurs\nrelus depuis le disque
+N ->> B : reconnexion, reprise des messages non acquittés
+A -> G : POST /ingest (lot n+1, renvoyé)
+G ->> B : publication, mêmes event_id
+B --> G : PubAck (événements déjà reçus : doublons écartés)
+G --> A : 202
+B ->> N : livraison
+N ->> B : normalized-events, Msg-Id = event_id
+B --> N : PubAck
+N --> B : ack du message brut
+!include _legende_seq.iuml
+@enduml

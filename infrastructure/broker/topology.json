@@ -1,5 +1,5 @@
 {
-  "description": "Flux et consommateurs durables de BaolSec (ADR 0002). Durées en secondes, tailles en octets. RAW_EVENTS : un message est supprimé dès que tous ses consommateurs l'ont acquitté (interest) ; plein, il refuse les nouveaux messages (la passerelle répond 503 et les agents gardent les événements dans leur tampon). Les autres flux sont conservés pour la relecture.",
+  "description": "Flux et consommateurs durables de BaolSec (ADR 0002). Durées en secondes, tailles en octets. RAW_EVENTS : un message est supprimé dès que tous ses consommateurs l'ont acquitté (interest) ; plein, il refuse les nouveaux messages (la passerelle répond 503 et les agents gardent les événements dans leur tampon). Les autres flux sont conservés pour la relecture. Consommateurs : le broker relivre sans limite (max_deliver = -1) ; le nombre de tentatives (attempts) est compté par baolsec_common.messaging.process, qui envoie le message en file de rejet après la 5e (C11).",
   "stream_defaults": {
     "storage": "file",
     "retention": "limits",
@@ -11,7 +11,8 @@
   "consumer_defaults": {
     "ack_policy": "explicit",
     "deliver_policy": "all",
-    "max_deliver": 5,
+    "max_deliver": -1,
+    "attempts": 5,
     "backoff": [
       5,
       15,

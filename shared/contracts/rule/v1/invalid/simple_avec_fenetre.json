@@ -1,0 +1,14 @@
+{
+  "id": "SYS-009",
+  "name": "Simple avec fenêtre",
+  "severity": "faible",
+  "type": "simple",
+  "category": [
+    "process"
+  ],
+  "match": {
+    "event.code": "4688"
+  },
+  "window": "5m",
+  "message": "xyz"
+}

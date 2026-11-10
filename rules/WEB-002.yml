@@ -1,0 +1,20 @@
+# Rafale d'erreurs 404 : scan de chemins (dirb, gobuster, ffuf).
+# Seuil simple sur le code 404 depuis une même IP.
+id: WEB-002
+name: Scan de chemins sur une application web
+description: >
+  Rafale de réponses HTTP 404 (page introuvable) depuis la même adresse,
+  signe d'un outil d'énumération de répertoires et de fichiers.
+severity: moyenne
+type: window
+category: [web]
+match:
+  event.category: web
+  http.response.status_code: 404
+group_by: [source.ip]
+window: 2m
+threshold: 30
+message: "{count} erreurs 404 en {window} depuis {source.ip}"
+requires:
+  - source_type: http
+    fields: [source.ip, http.response.status_code]

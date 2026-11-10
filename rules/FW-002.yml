@@ -1,0 +1,21 @@
+# Balayage de ports : une même IP touche de nombreux ports distincts bloqués.
+# Opérateur clé : distinct sur destination.port.
+id: FW-002
+name: Balayage de ports détecté par le pare-feu
+description: >
+  Le pare-feu bloque des connexions vers de nombreux ports différents depuis la même adresse.
+  Signature classique d'un balayage de ports (nmap, masscan).
+severity: elevee
+type: window
+category: [network]
+match:
+  event.category: network
+  event.outcome: failure
+group_by: [source.ip]
+window: 2m
+threshold: 10
+distinct: destination.port
+message: "{count} ports distincts bloqués en {window} depuis {source.ip}"
+requires:
+  - source_type: firewall
+    fields: [source.ip, destination.port]

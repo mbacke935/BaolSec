@@ -73,7 +73,7 @@ async def test_contenu_illisible_en_file_de_rejet_des_la_premiere_fois(normalize
     msg = Msg(json.dumps(raw("linux", "n'importe quoi")).encode())
     await Worker(broker, normalizer, cache)._one(msg)
     subject, dlq, msg_id = broker.sent[0]
-    assert subject == "dlq.normalization-worker" and msg_id == "dlq:normalization-worker:" + "e" * 64
+    assert subject == "dlq.normalization-worker" and msg_id == "dlq:normalization-worker:" + "e" * 64 + ":1"
     DLQ.validate(dlq)
     assert dlq["attempts"] == 1 and dlq["reason_code"] == "parse_error" and dlq["original_stream"] == "raw-events"
     assert msg.calls == ["ack"]

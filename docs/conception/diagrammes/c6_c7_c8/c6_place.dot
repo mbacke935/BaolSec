@@ -1,0 +1,29 @@
+digraph P {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Place de la passerelle d'ingestion</b><br/> >, fontsize=22, dpi=200, nodesep=0.45, ranksep=0.7, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=14];
+  edge [fontname="DejaVu Sans", fontsize=12, color="#37474F"];
+  node [shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#78909C"];
+  ag [label="Agents Fluent Bit\n(Linux, Windows, web)"]; col [label="Collecteur Fluent Bit\n(pfSense)"]; dir [label="Équipement Syslog TLS\n(entrée secondaire)"];
+  api [label="API\nécrit les sources"];
+  node [shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", penwidth=2];
+  gw [label=<<b>ingestion-gateway</b><br/>HTTPS 8443 · Syslog TLS 6514<br/>supervision 9000 (interne)>];
+  node [shape=cds, style=filled, fillcolor="#FFF8E1", color="#F57F17", penwidth=1];
+  raw [label="raw-events\nraw_event/v1"]; dlq [label="dlq\ndlq_message/v1"];
+  node [shape=cylinder]; pg [label="PostgreSQL\nconfig.sources,\nconfig.source_credentials"];
+  ag -> gw [label="POST /ingest, jeton\nréponse 202 / 4xx / 503"]; col -> gw [label="POST /ingest, jeton"];
+  dir -> gw [label="RFC 5425,\ncertificat client"];
+  edge [arrowhead=empty, arrowsize=1.1]; gw -> raw [label="Msg-Id = event_id"];
+  gw -> dlq [style=dotted, color="#C62828", fontcolor="#C62828", label="événement invalide"];
+  edge [arrowhead=normal, style=dashed, arrowsize=0.9]; gw -> pg [label="lecture seule\n(svc_passerelle)"];
+  edge [style=solid]; api -> pg;
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein, pointe pleine</td><td align="left">appel synchrone : l'émetteur attend la réponse</td></tr>
+    <tr><td>trait plein, pointe creuse</td><td align="left">message asynchrone par le broker</td></tr>
+    <tr><td>tirets</td><td align="left">lecture seule</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">mise en file de rejet</td></tr>
+    <tr><td bgcolor="#FFF8E1">jaune</td><td align="left">données conservées sur disque</td></tr>
+    <tr><td bgcolor="#E3F2FD">bleu, bord épais</td><td align="left">service décrit dans ce document</td></tr>
+    <tr><td bgcolor="#ECEFF1">gris</td><td align="left">autres composants</td></tr>
+  </table>>];
+  raw -> LEG [style=invis];
+}

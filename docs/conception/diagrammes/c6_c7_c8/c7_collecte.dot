@@ -1,0 +1,29 @@
+digraph C {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Chemins de collecte : conserver, transmettre, retirer après accusé</b><br/> >, fontsize=22, dpi=200, nodesep=0.35, ranksep=0.6, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  node [shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#78909C"];
+  s1 [label="Serveur Linux\nauth.log, journald,\njournal du noyau (iptables)"]; s2 [label="Poste ou serveur Windows\njournal Sécurité"];
+  s3 [label="Application web,\nbackend mobile\njournal d'accès, journal JSON"]; s4 [label="pfSense\n(Syslog UDP seulement)"];
+  node [shape=plain];
+  a1 [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="6" color="#1565C0" bgcolor="#E3F2FD"><tr><td><b>Agent Fluent Bit</b> (Linux)</td></tr><tr><td bgcolor="#FFF8E1">tampon disque + positions de lecture</td></tr></table>>];
+  a2 [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="6" color="#1565C0" bgcolor="#E3F2FD"><tr><td><b>Agent Fluent Bit</b> (Windows)</td></tr><tr><td bgcolor="#FFF8E1">tampon disque + positions de lecture</td></tr></table>>];
+  a3 [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="6" color="#1565C0" bgcolor="#E3F2FD"><tr><td><b>Agent Fluent Bit</b> (web)</td></tr><tr><td bgcolor="#FFF8E1">tampon disque + positions de lecture</td></tr></table>>];
+  a4 [label=<<table border="1" cellborder="0" cellspacing="0" cellpadding="6" color="#1565C0" bgcolor="#E3F2FD"><tr><td><b>Collecteur Fluent Bit</b><br/>même réseau local que pfSense</td></tr><tr><td bgcolor="#FFF8E1">tampon disque</td></tr></table>>];
+  node [shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#78909C"];
+  gw [label="Passerelle d'ingestion (C6)\nPOST /ingest, HTTPS"];
+  edge [style=dashed]; s1 -> a1 [label="lecture locale"]; s2 -> a2 [label="lecture locale"]; s3 -> a3 [label="lecture locale"];
+  edge [style=dotted, color="#E65100", fontcolor="#E65100"]; s4 -> a4 [label="Syslog UDP 514\nsans accusé"];
+  edge [style=solid, color="#37474F", fontcolor="#37474F"];
+  a1 -> gw; a2 -> gw; a3 -> gw; a4 -> gw [label="jeton de la source"];
+  gw -> a3 [style=dashed, dir=forward, label="202 : lot retiré\n429 / 503 : lot gardé", constraint=false];
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein, pointe pleine</td><td align="left">envoi HTTPS synchrone : l'agent attend la réponse avant de retirer le lot</td></tr>
+    <tr><td>tirets</td><td align="left">lecture d'un journal local, ou réponse de la passerelle</td></tr>
+    <tr><td><font color="#E65100">pointillés orange</font></td><td align="left">envoi sans accusé (UDP) : seul maillon non protégé</td></tr>
+    <tr><td bgcolor="#FFF8E1">jaune</td><td align="left">données conservées sur disque</td></tr>
+    <tr><td bgcolor="#E3F2FD">bleu</td><td align="left">configurations décrites dans ce document</td></tr>
+    <tr><td bgcolor="#ECEFF1">gris</td><td align="left">sources et passerelle</td></tr>
+  </table>>];
+  gw -> LEG [style=invis];
+}

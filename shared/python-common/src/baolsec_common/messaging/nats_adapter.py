@@ -12,7 +12,7 @@ from nats.aio.msg import Msg
 from nats.errors import ConnectionClosedError, NoRespondersError, NoServersError, TimeoutError as NatsTimeout
 from nats.js.errors import APIError
 
-from .interfaces import BrokerUnavailable, PublishResult
+from .interfaces import BrokerUnavailable, PublishResult, StateConflict, StateEntry
 
 log = logging.getLogger(__name__)
 
@@ -106,8 +106,84 @@ class NatsBroker:
         sub = await self._js.pull_subscribe_bind(durable=durable, stream=stream)
         return NatsSubscription(sub)
 
+    def state_store(self, bucket: str) -> "NatsStateStore":
+        return NatsStateStore(self._js, bucket)
+
     async def close(self) -> None:
         # Le service arrête d'abord de demander des messages et termine ceux en cours ;
         # flush envoie les derniers acquittements avant la fermeture.
         await self._nc.flush(timeout=5)
         await self._nc.close()
+
+
+WRONG_LAST_SEQUENCE = 10071      # JetStream : Nats-Expected-Last-Subject-Sequence non respecté
+
+
+class NatsStateStore:
+    """Bucket KV JetStream utilisé avec écriture conditionnelle et délai de vie par entrée.
+
+    L'écriture passe par une publication sur $KV.<bucket>.<clé> avec les en-têtes
+    Nats-Expected-Last-Subject-Sequence (révision attendue) et Nats-TTL (délai de vie) :
+    le client nats-py n'expose pas encore le délai de vie sur une mise à jour.
+    Le flux du bucket doit autoriser le délai de vie par message (allow_msg_ttl, posé par init_broker.py).
+    """
+
+    def __init__(self, js, bucket: str):
+        self._js = js
+        self._bucket = bucket
+        self._kv = None
+
+    async def _store(self):
+        if self._kv is None:
+            self._kv = await self._js.key_value(self._bucket)
+        return self._kv
+
+    async def get(self, key: str) -> StateEntry | None:
+        from nats.js.errors import KeyDeletedError, KeyNotFoundError
+        try:
+            entry = await (await self._store()).get(key)
+        except (KeyNotFoundError, KeyDeletedError):
+            return None
+        except _UNAVAILABLE as exc:
+            raise BrokerUnavailable(f"{type(exc).__name__}: {exc}") from exc
+        if entry.value is None:
+            return None
+        return StateEntry(key, entry.value, entry.revision)
+
+    async def put(self, key: str, value: bytes, expected_revision: int, ttl_s: float) -> int:
+        headers = {"Nats-Expected-Last-Subject-Sequence": str(expected_revision), "Nats-TTL": f"{max(1, int(ttl_s))}s"}
+        try:
+            ack = await self._js.publish(f"$KV.{self._bucket}.{key}", value, headers=headers, timeout=5)
+        except APIError as exc:
+            if exc.err_code == WRONG_LAST_SEQUENCE:
+                raise StateConflict(key) from exc
+            raise BrokerUnavailable(f"refus du broker : {exc.description}") from exc
+        except _UNAVAILABLE as exc:
+            raise BrokerUnavailable(f"{type(exc).__name__}: {exc}") from exc
+        return ack.seq
+
+    async def scan(self) -> list[StateEntry]:
+        from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
+        stream = f"KV_{self._bucket}"
+        info = await self._js.stream_info(stream)
+        if info.state.messages == 0:
+            return []
+        sub = await self._js.pull_subscribe(f"$KV.{self._bucket}.>", durable=None, stream=stream, config=ConsumerConfig(
+            deliver_policy=DeliverPolicy.LAST_PER_SUBJECT, ack_policy=AckPolicy.NONE, inactive_threshold=30))
+        prefix = f"$KV.{self._bucket}."
+        out: list[StateEntry] = []
+        try:
+            while True:
+                try:
+                    msgs = await sub.fetch(500, timeout=1)
+                except (NatsTimeout, asyncio.TimeoutError):
+                    break
+                for m in msgs:
+                    op = (m.headers or {}).get("KV-Operation")
+                    if op not in ("DEL", "PURGE") and m.data:
+                        out.append(StateEntry(m.subject[len(prefix):], m.data, m.metadata.sequence.stream))
+                if msgs and msgs[-1].metadata.num_pending == 0:
+                    break
+        finally:
+            await sub.unsubscribe()
+        return out

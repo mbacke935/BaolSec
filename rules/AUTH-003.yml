@@ -1,0 +1,23 @@
+# Une même IP essaie plusieurs comptes : password spraying.
+# Opérateur clé : distinct sur user.name (le seuil porte sur les comptes distincts, pas les tentatives).
+id: AUTH-003
+name: Password spraying depuis une même adresse
+description: >
+  Une même adresse IP tente de s'authentifier sur plusieurs comptes différents en peu de temps.
+  Technique classique pour contourner le verrouillage par compte.
+severity: elevee
+type: window
+category: [authentication]
+match:
+  event.category: authentication
+  event.outcome: failure
+group_by: [source.ip]
+window: 5m
+threshold: 4
+distinct: user.name
+message: "{count} comptes distincts visés en {window} depuis {source.ip}"
+requires:
+  - source_type: linux
+    fields: [user.name, source.ip]
+  - source_type: windows
+    fields: [user.name, source.ip]

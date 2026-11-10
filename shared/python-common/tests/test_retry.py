@@ -78,7 +78,7 @@ async def test_cinquieme_echec_publie_dlq_conforme_puis_acquitte():
     assert await process(msg, boom, policy(pub)) == "dlq"
     subject, dlq, msg_id = pub.sent[0]
     assert subject == "dlq.normalization-worker"
-    assert msg_id == f"dlq:normalization-worker:{'a' * 64}"
+    assert msg_id == f"dlq:normalization-worker:{'a' * 64}:42"
     assert sorted(VALIDATOR.iter_errors(dlq), key=str) == []
     assert dlq["attempts"] == 5 and dlq["reason_code"] == "parse_error" and dlq["payload_encoding"] == "json"
     assert msg.calls == [("ack",)]
@@ -120,3 +120,37 @@ async def test_echec_definitif_sans_dlq_joignable_non_acquitte():
     msg = FakeMessage(b"ligne illisible", delivery_count=1)
     assert await process(msg, permanent_boom, policy(FakePublisher(fail=True))) == "retry"
     assert msg.calls == []
+
+
+# ---------------------------------------------------------------- C11 : reprise et identifiants
+
+async def test_cinquieme_tentative_interrompue_part_en_dlq_a_la_livraison_suivante():
+    """Le broker ne limite pas les livraisons : un message revenu une 6e fois (5e tentative
+    interrompue) part en dlq au premier échec, avec attempts = 5 (maximum du contrat)."""
+    pub = FakePublisher()
+    msg = FakeMessage(b'{"x":1}', 6)
+    assert await process(msg, boom, policy(pub)) == "dlq"
+    assert pub.sent[0][1]["attempts"] == 5
+    VALIDATOR.validate(pub.sent[0][1])
+
+
+async def test_message_repris_garde_son_identifiant_d_origine():
+    pub = FakePublisher()
+    await process(FakeMessage(b"x", 5, msg_id="replay:7:replay:3:" + "c" * 64, stream_sequence=99), boom, policy(pub))
+    _, dlq, msg_id = pub.sent[0]
+    assert dlq["message_id"] == "c" * 64
+    assert msg_id == f"dlq:normalization-worker:{'c' * 64}:99"
+
+
+async def test_meme_message_relivre_meme_identifiant_de_rejet():
+    """Rejet publié deux fois pour la même livraison (acquittement perdu) : même Msg-Id, le broker écarte le doublon."""
+    pub = FakePublisher()
+    await process(FakeMessage(b"x", 5), boom, policy(pub))
+    await process(FakeMessage(b"x", 6), boom, policy(pub))
+    assert pub.sent[0][2] == pub.sent[1][2]
+
+
+async def test_sans_msg_id_identifiant_par_sequence():
+    pub = FakePublisher()
+    await process(FakeMessage(b"x", 5, msg_id=None, stream_sequence=12), boom, policy(pub))
+    assert pub.sent[0][1]["message_id"] == "seq:12"

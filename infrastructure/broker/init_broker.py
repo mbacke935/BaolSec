@@ -106,6 +106,12 @@ async def apply(url: str, token: str | None) -> None:
         except Exception:  # bucket absent
             await js.create_key_value(kv_cfg)
             print(f"bucket KV créé       {kv['bucket']}")
+        # Délai de vie par entrée (C14) : chaque état de fenêtre expire à la fin de sa fenêtre + 2 min.
+        stream = await js.stream_info(f"KV_{kv['bucket']}")
+        if not stream.config.allow_msg_ttl:
+            stream.config.allow_msg_ttl = True
+            await js.update_stream(stream.config)
+            print(f"délai de vie par entrée activé sur {kv['bucket']}")
     finally:
         await nc.close()
 

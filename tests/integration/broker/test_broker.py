@@ -167,7 +167,7 @@ async def test_deux_instances_se_partagent_le_flux(temp_stream):
 async def test_echecs_relivres_puis_dlq(temp_stream):
     js, name, subject = temp_stream
     await js.add_consumer(name, ConsumerConfig(durable_name="w", ack_policy=AckPolicy.EXPLICIT,
-                                               max_deliver=5, ack_wait=2))
+                                               max_deliver=-1, ack_wait=2))
     await js.publish(subject, b'{"contract":"raw_event/v1"}', headers={"Nats-Msg-Id": "bad-1"})
 
     broker = await NatsBroker.connect(URL, TOKEN)
@@ -192,6 +192,37 @@ async def test_echecs_relivres_puis_dlq(temp_stream):
     body = json.loads(dlq.data)
     await broker.close()
     assert body["message_id"] == "bad-1" and body["attempts"] == 5
+
+
+async def test_cinquieme_tentative_interrompue_puis_dlq(temp_stream):
+    """C11 : le service s'arrête pendant la 5e tentative (aucun acquittement). Le broker relivre
+    sans limite : le message revient et part en dlq, au lieu de rester bloqué dans le flux."""
+    js, name, subject = temp_stream
+    await js.add_consumer(name, ConsumerConfig(durable_name="w", ack_policy=AckPolicy.EXPLICIT,
+                                               max_deliver=-1, ack_wait=1))
+    msg_id = f"stuck-{uuid.uuid4().hex[:8]}"
+    await js.publish(subject, b'{"contract":"raw_event/v1"}', headers={"Nats-Msg-Id": msg_id})
+    broker = await NatsBroker.connect(URL, TOKEN)
+    sub = await broker.subscribe(name, "w")
+    policy = RetryPolicy(service="normalization-worker", stream="raw-events", publisher=broker,
+                         backoff=(0.2, 0.2, 0.2, 0.2))
+
+    async def always_fails(_m):
+        raise ProcessingError("processing_error", "test")
+
+    outcomes = []
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline and "dlq" not in outcomes:
+        for m in await sub.fetch(1, timeout=2):
+            if m.delivery_count == 5:
+                outcomes.append("interrompu")        # arrêt simulé : ni nak ni ack
+                continue
+            outcomes.append(await process(m, always_fails, policy))
+    await broker.close()
+    assert outcomes == ["retry"] * 4 + ["interrompu", "dlq"]
+    body = json.loads((await js.get_last_msg("DLQ", "dlq.normalization-worker")).data)
+    assert body["message_id"] == msg_id and body["attempts"] == 5
+    assert (await js.consumer_info(name, "w")).num_ack_pending == 0
 
 
 async def test_message_non_acquitte_est_relivre(temp_stream):
@@ -273,3 +304,28 @@ async def test_messages_conserves_apres_redemarrage(temp_stream):
     for m in rest:
         await m.ack_sync()
     await nc.close()
+
+
+# ---------------------------------------------------------------- état de détection (KV, C14)
+
+async def test_etat_ecriture_conditionnelle_et_expiration():
+    from baolsec_common.messaging import StateConflict
+    broker = await NatsBroker.connect(URL, TOKEN)
+    store = broker.state_store(KV["bucket"])
+    key = f"TEST-000.{uuid.uuid4().hex}"
+    try:
+        assert await store.get(key) is None
+        rev = await store.put(key, b"v1", 0, ttl_s=2)
+        with pytest.raises(StateConflict):
+            await store.put(key, b"autre", 0, ttl_s=2)            # une autre instance a déjà créé l'entrée
+        rev2 = await store.put(key, b"v2", rev, ttl_s=2)
+        with pytest.raises(StateConflict):
+            await store.put(key, b"v3", rev, ttl_s=2)             # révision périmée
+        entry = await store.get(key)
+        assert entry.value == b"v2" and entry.revision == rev2
+        assert any(e.key == key for e in await store.scan())
+        await asyncio.sleep(3.5)
+        assert await store.get(key) is None, "l'entrée doit expirer après son délai de vie"
+        assert await store.put(key, b"v4", 0, ttl_s=2) > rev2      # recréée après expiration
+    finally:
+        await broker.close()

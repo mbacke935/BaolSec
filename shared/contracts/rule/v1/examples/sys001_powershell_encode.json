@@ -1,0 +1,28 @@
+{
+  "id": "SYS-001",
+  "name": "PowerShell lancé avec une commande encodée",
+  "severity": "elevee",
+  "type": "simple",
+  "category": [
+    "process"
+  ],
+  "match": {
+    "event.code": "4688",
+    "process.command_line": {
+      "regex": "(?i)powershell.*\\s-e(nc(odedcommand)?)?\\s"
+    }
+  },
+  "message": "PowerShell encodé lancé par {user.name} sur {host.name}",
+  "group_by": [
+    "user.name",
+    "host.name"
+  ],
+  "requires": [
+    {
+      "source_type": "windows",
+      "fields": [
+        "process.command_line"
+      ]
+    }
+  ]
+}

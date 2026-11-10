@@ -1,0 +1,7 @@
+legend bottom left
+  |= Notation |= Signification |
+  | trait plein, pointe pleine | appel synchrone (l'émetteur attend la réponse) |
+  | trait plein, pointe ouverte | message asynchrone par le broker (publication ou livraison) |
+  | tirets | réponse ou accusé de réception (202, 503, PubAck, ack) |
+  | cylindre | conservation sur disque (tampon, flux, KV) |
+endlegend

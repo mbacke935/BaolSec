@@ -1,0 +1,29 @@
+digraph E {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Enrichissement d'un événement normalisé (C10)</b><br/> >, fontsize=22, dpi=200, nodesep=0.4, ranksep=0.7, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=14];
+  edge [fontname="DejaVu Sans", fontsize=12, color="#37474F"];
+  node [shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#78909C"];
+  admin [label="Administrateur\n(API, écran des sources)"];
+  node [shape=cylinder, style=filled, fillcolor="#FFF8E1", color="#F57F17"];
+  pg [label="PostgreSQL\nconfig.sources\nname, host, criticality"];
+  node [shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0"];
+  cache [label="Cache des sources\n(mémoire, relu toutes les 30 s)"];
+  ev [label="Événement après le parseur\n(baolsec.source.id, host.name ?,\nobserver.name ?, source.ip ?, destination.ip ?)"];
+  enr [label=<<b>Enricher</b>>, penwidth=2];
+  out [label="Événement enrichi\nbaolsec.source.name, .criticality\nhost.name ou observer.name\nbaolsec.ip_scope.source / .destination"];
+  node [shape=note, style=filled, fillcolor="#FAFAFA", color="#90A4AE"];
+  net [label="Plages internes standard\n+ NORMALIZER_INTERNAL_NETWORKS"];
+  admin -> pg [label="écrit (API)"];
+  edge [style=dashed]; pg -> cache [label="lecture seule\n(svc_normalisation)"];
+  edge [style=solid]; cache -> enr [label="source par id"]; ev -> enr; net -> enr [style=dotted, color="#78909C"]; enr -> out;
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein, pointe pleine</td><td align="left">appel ou transmission dans le service (ou écriture par l'API)</td></tr>
+    <tr><td>tirets</td><td align="left">lecture seule de la base</td></tr>
+    <tr><td>pointillés gris</td><td align="left">configuration du service</td></tr>
+    <tr><td bgcolor="#FFF8E1">jaune</td><td align="left">données conservées sur disque</td></tr>
+    <tr><td bgcolor="#ECEFF1">gris</td><td align="left">hors du service</td></tr>
+    <tr><td>« ? »</td><td align="left">champ présent seulement si le journal le fournit</td></tr>
+  </table>>];
+  out -> LEG [style=invis];
+}

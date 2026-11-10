@@ -1,0 +1,34 @@
+digraph P {
+  graph [rankdir=LR, fontname="DejaVu Sans", labelloc=t, label=<<b>Place du service de normalisation dans BaolSec</b><br/> >, fontsize=22, dpi=200, nodesep=0.45, ranksep=0.6, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=15];
+  edge [fontname="DejaVu Sans", fontsize=12, color="#37474F"];
+  node [shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#78909C"];
+  gw [label="Passerelle d'ingestion\n(C6)"];
+  aval [label="Détection (C12), indexation,\ncouverture (C17)"];
+  node [shape=cds, style=filled, fillcolor="#FFF8E1", color="#F57F17"];
+  raw [label="raw-events\nraw_event/v1"]; norm [label="normalized-events\nnormalized_event/v1"]; dlq [label="dlq\ndlq_message/v1"];
+  node [shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", penwidth=2];
+  nw [label=<<b>normalization-worker</b><br/>une ou plusieurs instances<br/>consommateur durable « normalization »>];
+  node [shape=cylinder, style=filled, fillcolor="#FFF8E1", color="#F57F17", penwidth=1];
+  pg [label="PostgreSQL\nconfig.sources"];
+  node [shape=note, style=filled, fillcolor="#FAFAFA", color="#90A4AE"];
+  ct [label="shared/contracts\nschémas JSON"];
+  edge [arrowhead=empty, arrowsize=1.1];
+  gw -> raw; raw -> nw [label="livraison"]; nw -> norm [label="publication\nMsg-Id = event_id"]; norm -> aval;
+  nw -> dlq [style=dotted, color="#C62828", label="contenu illisible\nou 5 échecs", fontcolor="#C62828"];
+  edge [arrowhead=normal, style=dashed, arrowsize=0.9];
+  nw -> pg [label="lecture seule\n(svc_normalisation)"];
+  edge [style=dotted, color="#78909C", arrowhead=normal];
+  nw -> ct [label="contrôle entrée\net sortie"];
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein, pointe creuse</td><td align="left">message asynchrone par le broker</td></tr>
+    <tr><td>tirets</td><td align="left">lecture seule (le service n'écrit jamais dans la base)</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">mise en file de rejet</td></tr>
+    <tr><td>pointillés gris</td><td align="left">référence à des fichiers (schémas des contrats)</td></tr>
+    <tr><td bgcolor="#FFF8E1">jaune</td><td align="left">données conservées sur disque (flux du broker, base)</td></tr>
+    <tr><td bgcolor="#E3F2FD">bleu, bord épais</td><td align="left">service décrit dans ce document</td></tr>
+    <tr><td bgcolor="#ECEFF1">gris</td><td align="left">autres services de BaolSec</td></tr>
+  </table>>];
+  {rank=same; dlq; LEG;}
+}

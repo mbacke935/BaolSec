@@ -1,0 +1,23 @@
+@startuml c14_etats
+!include _style.iuml
+title État d'une clé (règle + clé de regroupement) dans le KV detection-state
+[*] --> ABSENT
+ABSENT --> COMPTAGE : 1er événement retenu\n(création, révision 0)
+COMPTAGE --> COMPTAGE : événement retenu\n(écriture si révision inchangée)
+COMPTAGE --> ATTENTE : seuil atteint dans la fenêtre :\nalerte enregistrée « en attente »
+ATTENTE --> SIGNALE : PubAck de l'alerte,\nalerte effacée de l'état
+ATTENTE --> ATTENTE : arrêt avant le PubAck :\nrepubliée au contrôle suivant
+SIGNALE --> SIGNALE : événement de la même rafale\n(avant fin de fenêtre) : ignoré
+SIGNALE --> COMPTAGE : événement après la fin\nde la fenêtre signalée
+COMPTAGE --> ABSENT : aucune écriture pendant\nfenêtre + 2 min (expiration)
+SIGNALE --> ABSENT : expiration
+COMPTAGE : liste des event_id comptés et de leurs dates ;\nles plus anciens que (récent − fenêtre) sortent
+ATTENTE : l'alerte complète est dans l'état
+SIGNALE : compteur remis à zéro ;\nsuppress_until = début de fenêtre + fenêtre
+legend bottom left
+  |= Notation |= Signification |
+  | disque plein | aucune entrée pour cette clé |
+  | rectangle arrondi | état de l'entrée KV |
+  | flèche pleine | transition, avec l'événement qui la déclenche |
+endlegend
+@enduml

@@ -1,0 +1,15 @@
+{
+  "id": "NET-009",
+  "name": "Opérateur inconnu",
+  "severity": "faible",
+  "type": "simple",
+  "category": [
+    "network"
+  ],
+  "match": {
+    "source.ip": {
+      "eval": "__import__('os')"
+    }
+  },
+  "message": "xyz"
+}

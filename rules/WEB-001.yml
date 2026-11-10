@@ -1,0 +1,20 @@
+# Rafale d'erreurs 401/403 : force brute ou énumération sur une application web.
+# Seuil simple sur les codes de réponse HTTP indiquant un refus d'accès.
+id: WEB-001
+name: Force brute sur une application web
+description: >
+  Rafale de réponses HTTP 401 (non authentifié) ou 403 (interdit) depuis la même adresse,
+  signe d'une tentative de force brute ou d'énumération de chemins protégés.
+severity: elevee
+type: window
+category: [web]
+match:
+  event.category: web
+  http.response.status_code: [401, 403]
+group_by: [source.ip]
+window: 5m
+threshold: 15
+message: "{count} erreurs 401/403 en {window} depuis {source.ip}"
+requires:
+  - source_type: http
+    fields: [source.ip, http.response.status_code]

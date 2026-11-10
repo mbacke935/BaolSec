@@ -1,0 +1,38 @@
+digraph D {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>File de rejet : alimentation, supervision et reprise</b><br/> >, fontsize=22, dpi=200, nodesep=0.45, ranksep=0.5, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0"];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  subgraph cluster_p { label=<<b>Services qui rejettent</b>>; fontname="DejaVu Sans"; fontsize=13; color="#90A4AE"; style=rounded;
+    gw [label="Passerelle d'ingestion\névénement invalide reçu"];
+    nw [label="Normalisation\nillisible, non conforme,\nou 5 tentatives échouées"];
+    fut [label="Détection, incidents,\nindexation (W3, C19)", style="rounded,dashed,filled", fillcolor="#FFFFFF"];
+  }
+  dlq [label="Flux DLQ\ndlq.<service>\ndlq_message/v1\n30 jours, 2 Gio", shape=cylinder, fillcolor="#FFF8E1", color="#F57F17"];
+  mon [label="dlq-monitor\nbaolsec_dlq_messages\n{service, reason_code}"];
+  prom [label="Prometheus et Grafana\nalerte si la file augmente", style="rounded,dashed,filled", fillcolor="#FFFFFF"];
+  op [label="Administrateur", shape=box, style="rounded,filled", fillcolor="#ECEFF1", color="#546E7A"];
+  adm [label="dlq_admin.py\nlist · show · replay · purge"];
+  fix [label="Correction déployée\n(parseur, contrat, service)", fillcolor="#F1F8E9", color="#558B2F"];
+  orig [label="Flux d'origine\nraw-events, normalized-events, alerts", shape=cylinder, fillcolor="#E8F5E9", color="#2E7D32"];
+  src [label="Source émettrice", fillcolor="#ECEFF1", color="#546E7A"];
+  edge [arrowhead=onormal];
+  gw -> dlq [label="rejet à l'ingestion"]; nw -> dlq [label="rejet"]; fut -> dlq [label="rejet", style=dashed];
+  dlq -> mon [label="lecture toutes les 15 s", arrowhead=normal];
+  mon -> prom [style=dashed, arrowhead=normal, label="métriques"];
+  prom -> op [style=dashed, arrowhead=normal, label="alerte"];
+  op -> adm [arrowhead=normal, label="1. list, show"];
+  op -> fix [arrowhead=normal, label="2. corrige"];
+  fix -> adm [arrowhead=normal, label="3. replay"];
+  adm -> orig [label="republication\nMsg-Id replay:<seq>:<id>"];
+  adm -> dlq [arrowhead=normal, style=dotted, color="#C62828", fontcolor="#C62828", label="suppression après PubAck\n(replay, purge)"];
+  adm -> src [arrowhead=normal, label="ingest : non repris,\nla source renvoie"];
+  LEG [shape=plain, fontsize=11, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>pointe ouverte</td><td align="left">message publié dans le broker</td></tr>
+    <tr><td>pointe pleine</td><td align="left">lecture, appel ou action de l'exploitant</td></tr>
+    <tr><td>tirets</td><td align="left">élément prévu dans une carte ultérieure</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">suppression dans la file de rejet</td></tr>
+    <tr><td>cylindre</td><td align="left">flux persistant du broker</td></tr>
+  </table>>];
+  orig -> LEG [style=invis];
+}

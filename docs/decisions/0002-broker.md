@@ -64,7 +64,7 @@ Valeurs par défaut vérifiées sur le serveur : fenêtre de déduplication 120 
 ## Justification
 
 1. **Déduplication adaptée à notre architecture.** La passerelle est réplicable (ENF-08) et un agent peut renvoyer un lot vers une autre instance. JetStream déduplique sur tout le flux par `event_id`, quelle que soit l'instance qui publie. Redis 8.6 déduplique par producteur et Kafka par session de producteur : ni l'un ni l'autre ne couvre ce cas.
-2. **Reprises gérées par le broker.** Acquittement individuel, redélivrance automatique, compteur de livraisons et `MaxDeliver` correspondent directement à la règle « 5 tentatives puis dlq » de C3. Avec Redis Streams, cette mécanique serait à écrire et à tester.
+2. **Reprises gérées par le broker.** Acquittement individuel, redélivrance automatique avec délais croissants et compteur de livraisons fourni avec chaque message : le code commun s'appuie sur ce compteur pour appliquer la règle « 5 tentatives puis dlq » de C3 (le broker relivre sans limite depuis C11, voir la configuration ci-dessous). Avec Redis Streams, cette mécanique serait à écrire et à tester.
 3. **Mémoire.** Sur une machine de 8 Go partagée avec OpenSearch et PostgreSQL, un broker qui garde ses flux sur disque est préférable à Redis, qui garde tout le flux en RAM, et à Kafka/Redpanda, dont les besoins minimaux (JVM, 2 Go par cœur) dépassent ce qui reste disponible.
 4. **Une technologie de moins.** Le bucket KV intégré évite d'ajouter Redis pour l'état des règles. Redis reste le repli documenté si les tests de C14 montrent une limite du KV.
 5. **Ce qui a été écarté et pourquoi.** Kafka/Redpanda sont faits pour des volumes très supérieurs à ceux d'une PME, au prix d'une exploitation plus lourde. Redis Streams est simple, mais sa persistance n'est pas sa fonction première et les reprises seraient à coder.
@@ -72,6 +72,7 @@ Valeurs par défaut vérifiées sur le serveur : fenêtre de déduplication 120 
 ## Limites acceptées
 
 - **Durabilité sur un seul nœud.** Avec un seul serveur, la valeur par défaut `sync_interval: 2m` peut faire perdre jusqu'à 2 min de messages déjà acquittés en cas de coupure de courant ou de plantage du système (pas en cas d'arrêt du seul processus). BaolSec fixe **`sync_interval: 1s`** : perte maximale d'une seconde dans ce cas, avec un débit mesuré équivalent au défaut. `always` (fsync avant chaque accusé) sera adopté si la mesure sur la machine de démonstration montre qu'il tient ENF-02 avec la pile complète ; le résultat sera reporté dans C27.
+- **Expiration des fenêtres de détection.** C3 et C4 prévoient qu'une entrée du KV expire à la fin de sa fenêtre plus 2 minutes. Cette expiration par entrée est posée par `detection-worker` (C12) ; le `ttl` de 24 h du bucket n'est qu'un plafond de sécurité.
 - **Pas de grappe.** Un seul serveur NATS en démonstration ; la réplication des flux (jusqu'à 5 copies en grappe) est une évolution possible, pas un livrable.
 - **La dlq reste applicative**, comme prévu dans C3 : le service qui abandonne un message publie un `dlq_message/v1`, attend la confirmation, puis acquitte l'original.
 - **La fenêtre de déduplication est limitée** (fixée à 10 min) : chaque consommateur garde son idempotence applicative (C3 3.1).
@@ -83,12 +84,19 @@ Détail et valeurs dans `infrastructure/broker/` (flux et consommateurs) et `inf
 
 | Flux | Sujet | Rétention | Producteur | Consommateurs durables |
 |---|---|---|---|---|
-| `RAW_EVENTS` | `raw-events` | 72 h ou 20 Gio | ingestion-gateway | `normalization`, `coverage-raw` |
-| `NORMALIZED_EVENTS` | `normalized-events` | 72 h ou 20 Gio | normalization-worker | `detection`, `indexing-events`, `coverage-normalized` |
-| `ALERTS` | `alerts` | 30 jours ou 2 Gio | detection-worker | `incident-builder`, `indexing-alerts` |
-| `DLQ` | `dlq.<service>` | 30 jours ou 2 Gio, nouveaux messages refusés si plein | service qui abandonne un message | aucun (inspection par l'Administrateur) |
+| `RAW_EVENTS` | `raw-events` | Jusqu'à l'acquittement par tous ses consommateurs (au plus 7 jours) ; 20 Gio, nouveaux messages refusés si plein | ingestion-gateway | `normalization`, `coverage-raw` |
+| `NORMALIZED_EVENTS` | `normalized-events` | 7 jours ou 20 Gio | normalization-worker | `detection`, `indexing-events`, `coverage-normalized` |
+| `ALERTS` | `alerts` | 7 jours ou 2 Gio | detection-worker | `incident-builder`, `indexing-alerts` |
+| `DLQ` | `dlq.<service>` | 30 jours ou 2 Gio, nouveaux messages refusés si plein | passerelle (événement invalide) ou service qui abandonne un message | aucun (inspection par l'Administrateur, `GET /dlq`) |
 
-Commun à tous les consommateurs : mode pull, `AckExplicit`, `MaxDeliver` 5, `BackOff` 5 s, 15 s, 30 s, 60 s, `MaxAckPending` 1 000. Commun aux flux : stockage `file`, fenêtre de déduplication 10 min, taille maximale d'un message 1 Mio.
+**Deux politiques de conservation.**
+
+- `raw-events` ne sert qu'au traitement : un message y reste jusqu'à ce que `normalization` et `coverage-raw` l'aient acquitté, puis il est supprimé. Plein, le flux **refuse** les nouveaux messages au lieu de supprimer des messages non traités : la passerelle répond 503 et les agents gardent les événements dans leur tampon disque. Ainsi, un rattrapage après une longue coupure ne peut pas faire disparaître des événements qui n'ont pas encore été normalisés.
+- `normalized-events` et `alerts` servent aussi à la relecture et à la reconstruction des index OpenSearch (C4, section 8) : ils sont conservés 7 jours **ou** jusqu'à leur limite de taille, la première atteinte. Quand la limite est atteinte, les plus anciens sont supprimés.
+
+**Durée réelle de conservation.** La limite de taille peut être atteinte avant 7 jours. À titre d'exemple, à 500 événements/s de 600 octets, 20 Gio représentent environ 19,9 heures. La durée réelle dépend donc du débit stocké ; elle est suivie par la supervision et mesurée en C27. Une reconstruction d'OpenSearch n'est complète que pour les messages encore présents dans le flux.
+
+Commun à tous les consommateurs : mode pull, `AckExplicit`, `MaxDeliver` illimité (-1), `BackOff` 5 s, 15 s, 30 s, 60 s, `MaxAckPending` 1 000. Les 5 tentatives sont comptées par le code commun (`baolsec_common.messaging.process`) à partir du compteur de livraisons : avec `MaxDeliver` 5, un message dont la 5e tentative n'aboutit pas (service arrêté, file de rejet injoignable) ne serait plus jamais livré et resterait bloqué dans le flux (modification de la carte C11). Commun aux flux : stockage `file`, fenêtre de déduplication 10 min, taille maximale d'un message 1 Mio.
 
 ## Conséquences
 

@@ -1,0 +1,19 @@
+# Règle simple : un seul événement suffit (scénario D3 de C2, Atomic Red Team T1059.001).
+id: SYS-001
+name: PowerShell lancé avec une commande encodée
+description: >
+  Création d'un processus PowerShell avec l'option -EncodedCommand (ou ses abréviations -enc, -e),
+  souvent utilisée pour masquer une commande.
+severity: elevee
+type: simple
+category: [process]
+match:
+  event.category: process
+  event.code: "4688"
+  process.command_line:
+    regex: '(?i)powershell(\.exe)?["'']?\s.*-e(nc(odedcommand)?)?\s'
+group_by: [user.name, host.name]
+message: "PowerShell lancé avec une commande encodée par {user.name} sur {host.name}"
+requires:
+  - source_type: windows
+    fields: [process.command_line]

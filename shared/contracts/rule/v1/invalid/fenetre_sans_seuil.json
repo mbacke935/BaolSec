@@ -1,0 +1,17 @@
+{
+  "id": "AUTH-009",
+  "name": "Incomplète",
+  "severity": "faible",
+  "type": "window",
+  "category": [
+    "authentication"
+  ],
+  "match": {
+    "event.outcome": "failure"
+  },
+  "group_by": [
+    "user.name"
+  ],
+  "window": "5m",
+  "message": "x {count}"
+}

@@ -35,6 +35,65 @@ services:
     restart: "no"
     networks: [internal]
 
+  # Taille de la file de rejet pour Prometheus (C11) : baolsec_dlq_messages{service,reason_code},
+  # baolsec_dlq_bytes, baolsec_dlq_oldest_age_seconds. Port 9102 sur le réseau interne uniquement.
+  dlq-monitor:
+    build:
+      context: ../
+      dockerfile: broker/Dockerfile
+    command: ["python", "broker/dlq_admin.py", "metrics", "--port", "9102", "--interval", "15"]
+    environment:
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9102/metrics', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 4
+    restart: unless-stopped
+    networks: [internal]
+
+  # --- Base PostgreSQL (C4 ; socle de C19 avancé pour C12 à C17) ---------------------------
+  postgresql:
+    image: postgres:17-alpine
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=60"]
+    environment:
+      POSTGRES_DB: baolsec
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # développement uniquement : outils et tests depuis la machine
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "baolsec"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    networks: [internal]
+
+  db-migrate:
+    build:
+      context: ../
+      dockerfile: database/Dockerfile
+    environment:
+      DATABASE_ADMIN_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@postgresql:5432/baolsec
+      SVC_API_PASSWORD: ${SVC_API_PASSWORD:-}
+      SVC_PASSERELLE_PASSWORD: ${SVC_PASSERELLE_PASSWORD:-}
+      SVC_NORMALISATION_PASSWORD: ${SVC_NORMALISATION_PASSWORD:-}
+      SVC_DETECTION_PASSWORD: ${SVC_DETECTION_PASSWORD:-}
+      SVC_INCIDENTS_PASSWORD: ${SVC_INCIDENTS_PASSWORD:-}
+      SVC_COUVERTURE_PASSWORD: ${SVC_COUVERTURE_PASSWORD:-}
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    restart: "no"
+    networks: [internal]
+
   ingestion-gateway:
     build:
       context: ../..
@@ -42,9 +101,11 @@ services:
     environment:
       BROKER_URL: nats://broker:4222
       BROKER_TOKEN: ${BROKER_TOKEN}
-      # Référentiel des sources : fichier de développement tant que PostgreSQL n'est pas déployé,
-      # puis GATEWAY_SOURCE_REGISTRY=postgres et GATEWAY_POSTGRES_DSN (compte svc_passerelle, lecture seule).
-      GATEWAY_SOURCE_REGISTRY: file
+      # Référentiel des sources : fichier de développement par défaut (les tests de C6 le modifient) ;
+      # base PostgreSQL avec GATEWAY_SOURCE_REGISTRY=postgres et GATEWAY_POSTGRES_DSN (compte svc_passerelle)
+      # dans .env, après make db-seed (infrastructure/database/README.md).
+      GATEWAY_SOURCE_REGISTRY: ${GATEWAY_SOURCE_REGISTRY:-file}
+      GATEWAY_POSTGRES_DSN: ${GATEWAY_POSTGRES_DSN:-}
       GATEWAY_SOURCES_FILE: /run/baolsec/dev/sources.json
       GATEWAY_SOURCES_REFRESH_S: "5"
       GATEWAY_TLS_CERT: /run/baolsec/dev/gateway.crt
@@ -75,10 +136,11 @@ services:
     environment:
       BROKER_URL: nats://broker:4222
       BROKER_TOKEN: ${BROKER_TOKEN}
-      # Référentiel des sources (enrichissement, C10) : même fichier que la passerelle tant que
-      # PostgreSQL n'est pas déployé, puis NORMALIZER_SOURCE_REGISTRY=postgres et NORMALIZER_POSTGRES_DSN
-      # (compte svc_normalisation, lecture seule).
-      NORMALIZER_SOURCE_REGISTRY: file
+      # Référentiel des sources (enrichissement, C10) : même fichier que la passerelle par défaut ;
+      # base PostgreSQL avec NORMALIZER_SOURCE_REGISTRY=postgres et NORMALIZER_POSTGRES_DSN
+      # (compte svc_normalisation) dans .env.
+      NORMALIZER_SOURCE_REGISTRY: ${NORMALIZER_SOURCE_REGISTRY:-file}
+      NORMALIZER_POSTGRES_DSN: ${NORMALIZER_POSTGRES_DSN:-}
       NORMALIZER_SOURCES_FILE: /run/baolsec/dev/sources.json
       NORMALIZER_SOURCES_REFRESH_S: "5"
       NORMALIZER_SYSLOG_TIMEZONE: ${NORMALIZER_SYSLOG_TIMEZONE:-UTC}
@@ -99,6 +161,34 @@ services:
     # Plusieurs instances se partagent le flux : docker compose up -d --scale normalization-worker=2
     restart: unless-stopped
     stop_grace_period: 20s     # termine le lot en cours avant l'arrêt
+    networks: [internal]
+
+  # --- Détection (C12, C14) ------------------------------------------------------------------
+  detection-worker:
+    build:
+      context: ../..
+      dockerfile: services/detection-worker/Dockerfile
+    environment:
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+      # Règles lues dans config.rules (compte svc_detection, lecture seule), chargées par make rules-load
+      DETECTOR_RULES_SOURCE: ${DETECTOR_RULES_SOURCE:-postgres}
+      DETECTOR_POSTGRES_DSN: postgresql://svc_detection:${SVC_DETECTION_PASSWORD}@postgresql:5432/baolsec
+      DETECTOR_RULES_REFRESH_S: ${DETECTOR_RULES_REFRESH_S:-30}
+      DETECTOR_PENDING_INTERVAL_S: ${DETECTOR_PENDING_INTERVAL_S:-60}
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    # Pas de port publié. Plusieurs instances : docker compose up -d --scale detection-worker=2
+    restart: unless-stopped
+    stop_grace_period: 20s
     networks: [internal]
 
   # --- Collecte (C7) : services de test, démarrés avec le profil « agents-test » -------------
@@ -151,6 +241,7 @@ services:
 
 volumes:
   broker-data:
+  postgres-data:
   agent-test-state:
   collector-state:
 

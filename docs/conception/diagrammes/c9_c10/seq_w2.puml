@@ -1,0 +1,36 @@
+@startuml seq_w2
+!include _style.iuml
+autonumber
+title W2 — Normalisation : publier d'abord, acquitter ensuite
+queue "raw-events" as R
+participant "normalization-worker\n(une des instances)" as W
+participant "Référentiel des sources\n(cache en mémoire)" as C
+queue "normalized-events" as N
+queue "dlq" as Q
+
+R ->> W : livraison (lot de 200 au plus)
+W -> W : contrôler raw_event/v1, choisir le parseur
+alt contenu lisible
+  W -> C : nom, hôte, criticité de la source
+  C --> W : valeurs (ou rien si la source n'est plus déclarée)
+  W -> W : enveloppe ECS, enrichissement, related.*,\ncontrôle normalized_event/v1
+  W ->> N : publier (Msg-Id = event_id)
+  alt PubAck reçu (stocké, ou doublon écarté)
+    N --> W : PubAck
+    W --> R : ack
+  else broker indisponible
+    W --> R : nak avec délai (5, 15, 30, 60 s)
+    note right of R : relivré plus tard ;\nà la 5e tentative : dlq\n(processing_error)
+  end
+else contenu illisible ou non conforme
+  W ->> Q : publier dlq_message/v1\n(parse_error, validation_error ou mapping_error)
+  alt dlq confirme
+    Q --> W : PubAck
+    W --> R : ack
+  else dlq pleine ou indisponible
+    note right of W : pas d'acquittement :\nle message sera relivré
+  end
+end
+note over W, N : un ack perdu fait relivrer le message ; il est republié avec le même Msg-Id\net le broker écarte le doublon (fenêtre de 10 min)
+!include _legende_seq.iuml
+@enduml

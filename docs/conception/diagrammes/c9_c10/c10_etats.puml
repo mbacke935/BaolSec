@@ -1,0 +1,18 @@
+@startuml c10_etats
+!include _style.iuml
+title Référentiel des sources : lecture de raw-events selon l'état du cache
+[*] --> VIDE : démarrage
+VIDE --> UTILISABLE : premier chargement réussi
+UTILISABLE --> UTILISABLE : rafraîchissement réussi (toutes les 30 s)
+UTILISABLE --> PERIME : échecs de lecture pendant plus de 5 min
+PERIME --> UTILISABLE : lecture réussie
+VIDE : aucune lecture de raw-events
+UTILISABLE : lecture de raw-events,\nenrichissement avec la dernière version
+PERIME : lecture suspendue, /health = 503 ;\nles messages attendent dans le broker
+legend bottom left
+  |= Notation |= Signification |
+  | disque plein | état initial (démarrage du service) |
+  | rectangle arrondi | état du cache, avec son effet sur la lecture |
+  | flèche pleine | transition, avec l'événement qui la déclenche |
+endlegend
+@enduml

@@ -1,0 +1,26 @@
+@startuml c14_reprise
+!include _style.iuml
+title Arrêt entre l'écriture de l'état et la publication de l'alerte
+participant "Broker\n(normalized-events)" as NE
+participant "detection-worker\n(instance A)" as A
+database "KV\ndetection-state" as KV
+participant "Broker\n(alerts)" as AL
+participant "detection-worker\n(redémarré)" as B
+NE ->> A : 5e échec (admin, 10.0.4.23)
+A -> KV : lire l'état (révision 41)
+KV --> A : 4 événements comptés
+A -> KV : écrire si révision = 41 :\n5 événements, alerte « en attente »
+KV --> A : révision 42
+note over A #FFEBEE : arrêt brutal avant la publication
+note over NE : 5e échec non acquitté :\nrelivré plus tard
+B -> KV : contrôle au démarrage :\nlire toutes les entrées
+KV --> B : entrée avec alerte en attente
+B ->> AL : publier, Msg-Id = alert_id
+AL --> B : PubAck
+B -> KV : effacer l'alerte (si révision = 42)
+NE ->> B : 5e échec relivré
+B -> KV : lire l'état
+KV --> B : event_id déjà compté
+B --> NE : ack (aucune nouvelle alerte)
+!include _legende_seq.iuml
+@enduml

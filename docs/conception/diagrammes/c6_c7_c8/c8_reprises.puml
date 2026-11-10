@@ -1,0 +1,21 @@
+@startuml c8_reprises
+!include _style.iuml
+title Cycle de vie d'un message pour un consommateur (5 tentatives)
+[*] --> EN_ATTENTE : publié dans le flux (PubAck)
+EN_ATTENTE --> LIVRE : demandé par une instance (pull)
+LIVRE --> ACQUITTE : traitement réussi,\neffets persistés, puis ack
+LIVRE --> EN_ATTENTE : échec passager (nak avec délai)\nou pas de réponse avant AckWait
+LIVRE --> EN_DLQ : 5e échec, ou échec définitif\n(dlq_message/v1 confirmé, puis ack)
+LIVRE --> LIVRE : dlq pleine ou indisponible :\npas d'ack, nouvelle livraison
+ACQUITTE --> [*]
+EN_DLQ --> [*]
+EN_ATTENTE : délais entre livraisons : 5, 15, 30, 60 s
+EN_DLQ : conservé 30 jours,\ninspection par l'Administrateur
+legend bottom left
+  |= Notation |= Signification |
+  | disque plein | point de départ (message stocké) |
+  | cercle cerclé | fin du traitement pour ce consommateur |
+  | rectangle arrondi | état du message pour un consommateur durable |
+  | flèche pleine | transition, avec l'événement qui la déclenche |
+endlegend
+@enduml

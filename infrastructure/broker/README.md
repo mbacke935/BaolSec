@@ -7,7 +7,8 @@ Décision et comparaison : `docs/decisions/0002-broker.md`.
 | `nats-server.conf` | Serveur : JetStream, stockage `/data`, `sync_interval: 1s`, jeton `BROKER_TOKEN` |
 | `topology.json` | Flux, rétention et consommateurs durables (source de vérité) |
 | `init_broker.py` | Crée ou met à jour la topologie et le bucket KV ; peut être relancé |
-| `Dockerfile` | Image du conteneur ponctuel `broker-init` |
+| `dlq_admin.py` | Exploitation de la file de rejet : liste, détail, reprise, purge, métriques (C11) |
+| `Dockerfile` | Image des outils : conteneur ponctuel `broker-init`, service `dlq-monitor` |
 | `../state-store/detection-state.json` | Bucket KV de l'état des règles |
 
 ## Démarrer
@@ -27,9 +28,44 @@ make test-broker              # tests d'intégration (persistance, relecture, pa
 | `ALERTS` | `alerts` | 7 jours ou 2 Gio | `incident-builder`, `indexing-alerts` |
 | `DLQ` | `dlq.<service>` | 30 jours ou 2 Gio (refus des nouveaux messages si plein) | — (lecture par l'API, `GET /dlq`) |
 
-Consommateurs : pull, acquittement explicite, 5 livraisons au plus, délais 5 s, 15 s, 30 s, 60 s.
-Le service qui échoue à la 5e livraison publie un `dlq_message/v1` puis acquitte l'original
-(`baolsec_common.messaging.process`).
+Consommateurs : pull, acquittement explicite, délais de relivraison 5 s, 15 s, 30 s, 60 s.
+Le broker relivre sans limite (`max_deliver` = -1) ; les 5 tentatives sont comptées par
+`baolsec_common.messaging.process`. Le service qui échoue à la 5e tentative publie un `dlq_message/v1`
+puis acquitte l'original. Un contenu illisible ou non conforme part en file de rejet dès la 1re tentative.
+Un message dont la 5e tentative n'a pas abouti (service arrêté, file de rejet injoignable) revient
+et part en file de rejet à la livraison suivante.
+
+## File de rejet (C11)
+
+```bash
+make dlq-list                                     # nombre de messages par service et par motif
+make dlq-list ARGS="-v --service normalization-worker --since 2026-11-08T00:00:00Z"
+make dlq-show SEQ=42                              # motif, tentatives, contenu d'origine
+make dlq-replay ARGS="--reason parse_error --dry-run"   # ce qui serait repris
+make dlq-replay ARGS="--reason parse_error"             # reprise, puis retrait de la file
+make dlq-purge ARGS="--service normalization-worker --reason validation_error --yes"
+make dlq-monitor-up                               # métriques Prometheus sur dlq-monitor:9102
+```
+
+Procédure :
+
+1. `make dlq-list` : repérer le service et le motif qui augmentent (alerte sur `baolsec_dlq_messages`).
+2. `make dlq-show SEQ=…` sur quelques messages : contenu d'origine et motif.
+3. Corriger la cause : parseur ou correspondance ECS (`parse_error`, `mapping_error`), contrat (`validation_error`),
+   service ou broker indisponible (`processing_error`, rien à corriger dans le code).
+4. Déployer la correction, puis `make dlq-replay ARGS="--reason … --dry-run"`, puis sans `--dry-run`.
+5. Les messages qui échouent encore retournent en file de rejet avec leur identifiant d'origine.
+6. Un message sans intérêt (format non pris en charge, test) est supprimé avec `make dlq-purge … --yes`.
+
+Reprise : le contenu d'origine est republié dans son flux avec le Msg-Id `replay:<séquence>:<identifiant>` ;
+l'`event_id` (ou l'`alert_id`) ne change pas, donc les services en aval restent idempotents. La republication
+est confirmée avant la suppression dans la file : un arrêt entre les deux laisse le message dans la file, sans perte.
+Un événement refusé par la passerelle (`original_stream` = `ingest`) n'est pas repris : la source le renvoie.
+Une reprise vers `normalized-events` ou `alerts` est reçue par tous les consommateurs du flux ; ils écartent
+ce qu'ils ont déjà traité (`_id` = `event_id` dans OpenSearch, `alert_id` déterministe).
+
+La file conserve les messages 30 jours (2 Gio au plus). Pleine, elle refuse les nouveaux rejets : le service
+n'acquitte pas le message en échec, qui reste dans son flux d'origine. Rien n'est supprimé sans action de l'exploitant.
 
 ## Règles
 

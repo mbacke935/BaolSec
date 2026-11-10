@@ -1,0 +1,35 @@
+digraph T {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Traitement d'un événement normalisé</b><br/> >, fontsize=22, dpi=200, nodesep=0.45, ranksep=0.4, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", width=3.4];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  lire [label="1. Lire l'événement\n(consommateur durable « detection »)"];
+  cand [label="2. Règles candidates\nindex par event.category"];
+  type [label="Type de règle ?", shape=diamond, style=filled, width=2.2, height=0.9];
+  simple [label="3a. Conditions vraies ?\nAlerte (alert_id stable)", fillcolor="#F1F8E9", color="#558B2F"];
+  kvr [label="3b. Lire l'état dans le KV\n(révision r)", fillcolor="#F1F8E9", color="#558B2F"];
+  eval [label="4. Compter l'événement\n(sauf doublon, retard, rafale déjà signalée)", fillcolor="#F1F8E9", color="#558B2F"];
+  kvw [label="5. Écrire l'état si révision = r\nalerte « en attente » si seuil atteint", fillcolor="#F1F8E9", color="#558B2F"];
+  pub [label="6. Publier dans alerts\nMsg-Id = alert_id, attendre le PubAck"];
+  clr [label="7. Effacer l'alerte en attente"];
+  ack [label="8. Acquitter l'événement\n(après toutes les règles)", fillcolor="#C8E6C9", color="#2E7D32"];
+  node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#90A4AE", width=2.4];
+  retry [label="Révision changée\n(autre instance) :\nrelire et recommencer"];
+  rep [label="Contrôle périodique :\nrepublier les alertes\nen attente"];
+  lire -> cand -> type;
+  type -> simple [label="simple"]; type -> kvr [label="window"];
+  kvr -> eval -> kvw -> pub; simple -> pub;
+  pub -> clr -> ack;
+  edge [style=dashed];
+  kvw -> retry [label="conflit"]; retry -> kvr;
+  pub -> rep [label="arrêt avant\nle PubAck"]; rep -> pub;
+  LEG [shape=plain, fontsize=11, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein</td><td align="left">étape suivante</td></tr>
+    <tr><td>tirets</td><td align="left">reprise après un conflit ou un arrêt</td></tr>
+    <tr><td>losange</td><td align="left">choix selon le type de règle</td></tr>
+    <tr><td bgcolor="#F1F8E9">vert clair</td><td align="left">propre à une règle (simple ou à fenêtre)</td></tr>
+  </table>>];
+  {rank=same; kvw; retry;}
+  {rank=same; pub; rep;}
+  ack -> LEG [style=invis];
+}

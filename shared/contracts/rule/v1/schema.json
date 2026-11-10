@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baolsec.local/contracts/rule/v1/schema.json",
+  "title": "rule/v1",
+  "description": "Règle de détection BaolSec écrite en YAML (C12, C13). Stockée dans config.rule_versions.definition_yaml ; évaluée par detection-worker sur normalized_event/v1. Aucune expression n'est exécutée comme du code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "severity",
+    "type",
+    "category",
+    "match",
+    "message"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z]{2,6}-[0-9]{3}$",
+      "description": "Code stable de la règle (rule.id des alertes). L'identifiant PostgreSQL en est dérivé (UUID v5)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "severity": {
+      "enum": [
+        "faible",
+        "moyenne",
+        "elevee",
+        "critique"
+      ]
+    },
+    "type": {
+      "enum": [
+        "simple",
+        "window"
+      ],
+      "description": "simple : un événement suffit ; window : seuil sur une fenêtre temporelle (état dans le KV detection-state)."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "category": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "authentication",
+          "process",
+          "network",
+          "web",
+          "api",
+          "iam",
+          "file",
+          "host",
+          "session",
+          "configuration",
+          "intrusion_detection"
+        ]
+      },
+      "description": "event.category des alertes ; sert aussi à la corrélation (C3 3.8, enchaînements d'activités)."
+    },
+    "match": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z@][a-z0-9_]*(\\.[a-z0-9_]+)*$",
+        "description": "Chemin d'un champ de normalized_event/v1, par exemple user.name ou event.outcome."
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "description": "L'une des valeurs."
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "maxProperties": 1,
+            "description": "Opérateur explicite.",
+            "properties": {
+              "equals": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "not": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              "in": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              },
+              "exists": {
+                "type": "boolean"
+              },
+              "contains": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Sous-chaîne, sans tenir compte de la casse."
+              },
+              "regex": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "description": "Expression régulière Python (recherche)."
+              },
+              "gte": {
+                "type": "number"
+              },
+              "lte": {
+                "type": "number"
+              }
+            }
+          }
+        ]
+      },
+      "description": "Toutes les conditions doivent être vraies. Un champ à plusieurs valeurs (event.category) est vrai si l'une d'elles convient."
+    },
+    "group_by": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z@][a-z0-9_]*(\\.[a-z0-9_]+)*$",
+        "description": "Chemin d'un champ de normalized_event/v1, par exemple user.name ou event.outcome."
+      },
+      "description": "Clé de regroupement : un compteur par combinaison de valeurs. Un événement sans l'un de ces champs est ignoré."
+    },
+    "window": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*[smh]$",
+      "description": "Durée de la fenêtre (24 h au plus)."
+    },
+    "threshold": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 1000
+    },
+    "distinct": {
+      "type": "string",
+      "pattern": "^[a-z@][a-z0-9_]*(\\.[a-z0-9_]+)*$",
+      "description": "Compter les valeurs distinctes de ce champ au lieu des événements (ex. destination.port pour un balayage)."
+    },
+    "followed_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "match"
+      ],
+      "properties": {
+        "match": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z@][a-z0-9_]*(\\.[a-z0-9_]+)*$",
+            "description": "Chemin d'un champ de normalized_event/v1, par exemple user.name ou event.outcome."
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "description": "L'une des valeurs."
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "maxProperties": 1,
+                "description": "Opérateur explicite.",
+                "properties": {
+                  "equals": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "not": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  },
+                  "in": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "exists": {
+                    "type": "boolean"
+                  },
+                  "contains": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Sous-chaîne, sans tenir compte de la casse."
+                  },
+                  "regex": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Expression régulière Python (recherche)."
+                  },
+                  "gte": {
+                    "type": "number"
+                  },
+                  "lte": {
+                    "type": "number"
+                  }
+                }
+              }
+            ]
+          },
+          "description": "Toutes les conditions doivent être vraies. Un champ à plusieurs valeurs (event.category) est vrai si l'une d'elles convient."
+        }
+      },
+      "description": "L'alerte est émise quand un événement correspondant arrive après le seuil atteint dans la fenêtre (ex. échecs puis succès)."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 300,
+      "description": "Texte de l'alerte. Variables : {count}, {window} et tout champ de group_by, par exemple {user.name}."
+    },
+    "requires": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_type"
+        ],
+        "properties": {
+          "source_type": {
+            "enum": [
+              "linux",
+              "windows",
+              "firewall",
+              "http"
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z@][a-z0-9_]*(\\.[a-z0-9_]+)*$",
+              "description": "Chemin d'un champ de normalized_event/v1, par exemple user.name ou event.outcome."
+            },
+            "uniqueItems": true
+          }
+        }
+      },
+      "description": "Données nécessaires (config.rule_requirements) : la couverture (C17) signale la règle si ces sources se taisent."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "window"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "group_by",
+          "window",
+          "threshold"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "window"
+              ]
+            },
+            {
+              "required": [
+                "threshold"
+              ]
+            },
+            {
+              "required": [
+                "distinct"
+              ]
+            },
+            {
+              "required": [
+                "followed_by"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

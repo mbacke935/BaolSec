@@ -1,0 +1,42 @@
+digraph T {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Traitement d'un message raw-events</b><br/> >, fontsize=22, dpi=200, nodesep=0.5, ranksep=0.42, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=14, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", width=3.6];
+  edge [fontname="DejaVu Sans", fontsize=12, color="#37474F", arrowhead=normal];
+  lire [label="1. Lire le message\n(consommateur durable « normalization »)"];
+  ctrl [label="2. Contrôler raw_event/v1"];
+  choix [label="3. Choisir le parseur\nselon source.type", shape=diamond, style=filled, width=2.6, height=1.1];
+  node [fillcolor="#F1F8E9", color="#558B2F", width=2.2];
+  lx [label="linux\nauth.log, journald,\npare-feu iptables"]; fw [label="firewall\npfSense filterlog"]; win [label="windows\njournal Sécurité"]; web [label="http\naccès web,\njournal JSON"];
+  node [fillcolor="#E3F2FD", color="#1565C0", width=3.6];
+  env [label="4. Enveloppe commune\n@timestamp, event.id, event.original,\nsévérité normalisée"];
+  enr [label="5. Enrichir (C10)\nsource, criticité, hôte, ip_scope"];
+  rel [label="6. related.ip, related.user, related.hosts"];
+  ctl2 [label="7. Contrôler normalized_event/v1"];
+  pub [label="8. Publier dans normalized-events\nMsg-Id = event_id, attendre le PubAck"];
+  ack [label="9. Acquitter le message brut", fillcolor="#C8E6C9", color="#2E7D32"];
+  node [shape=cds, style=filled, fillcolor="#FFF8E1", color="#F57F17", width=1.6];
+  dlq [label="dlq"];
+  node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#90A4AE", width=2.4];
+  retry [label="Nouvelle livraison\n5, 15, 30, 60 s\n(dlq à la 5e)"];
+  lire -> ctrl -> choix;
+  choix -> lx; choix -> fw; choix -> win; choix -> web;
+  lx -> env; fw -> env; win -> env; web -> env;
+  env -> enr -> rel -> ctl2 -> pub -> ack;
+  edge [style=dotted, color="#C62828", fontcolor="#C62828"];
+  ctrl -> dlq [label="validation_error"];
+  choix -> dlq [label="parse_error"];
+  ctl2 -> dlq [label="mapping_error"];
+  edge [style=dashed, color="#37474F", fontcolor="#37474F"];
+  pub -> retry [label="broker indisponible"];
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein</td><td align="left">étape suivante du traitement</td></tr>
+    <tr><td>losange</td><td align="left">choix selon le type de la source</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">échec définitif : file de rejet dès la 1re tentative,<br align="left"/>puis acquittement du message brut</td></tr>
+    <tr><td>tirets</td><td align="left">échec passager : message non acquitté, relivré</td></tr>
+    <tr><td bgcolor="#F1F8E9">vert clair</td><td align="left">parseur propre à une famille de sources</td></tr>
+  </table>>];
+  {rank=same; choix; dlq;}
+  {rank=same; pub; retry;}
+  ack -> LEG [style=invis];
+}

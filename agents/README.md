@@ -52,8 +52,9 @@ Fluent Bit doit pouvoir lire `/var/log/auth.log` et le journal (groupes `adm` et
 ou exécution en root comme le service fourni par le paquet).
 
 **Pare-feu iptables** : seules les lignes produites par la cible `LOG` sont collectées (format
-`SRC=… DST=…`). Exemple : `iptables -A INPUT -j LOG --log-prefix "BAOLSEC-FW " --log-level 4`
-avant la règle `DROP`.
+`SRC=… DST=…`). Exemple : `iptables -A INPUT -j LOG --log-prefix "BAOLSEC-DROP " --log-level 4`
+avant la règle `DROP`. Le préfixe indique la décision à la normalisation (C9) : un préfixe contenant
+DROP, REJECT, BLOCK ou DENY donne un refus, ACCEPT, ALLOW ou PASS une autorisation.
 
 ## Installer un agent Windows
 

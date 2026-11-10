@@ -1,0 +1,25 @@
+digraph T {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Traitement d'un lot HTTPS (POST /ingest)</b><br/> >, fontsize=22, dpi=200, nodesep=0.5, ranksep=0.4, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=14, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", width=3.8];
+  edge [fontname="DejaVu Sans", fontsize=12, color="#37474F"];
+  a [label="1. TLS, puis jeton Bearer → source\n(empreinte SHA-256 dans le cache des sources ;\ncache périmé : 503)"];
+  b [label="2. Taille du corps (8 Mio) et tableau JSON lisible\n(50 000 événements au plus)"];
+  c [label="3. Limite de débit de la source\n(seau à jetons, 500 évt/s, rafale 5 000)"];
+  d [label="4. Pour chaque enregistrement :\ncontrôle, event_id, enveloppe raw_event/v1"];
+  e [label="5. Publier tous les événements valides dans raw-events\net tous les invalides dans la dlq, en parallèle"];
+  f [label="6. Chaque publication confirmée ?", shape=diamond, style=filled, width=3, height=1];
+  ok [label="202 : nombre accepté, liste des refusés\n(l'agent retire le lot de son tampon)", fillcolor="#C8E6C9", color="#2E7D32"];
+  node [fillcolor="#FFFFFF", color="#90A4AE", width=2.6];
+  r401 [label="401 : lot abandonné"]; r429 [label="429 + Retry-After :\nlot gardé, nouvel essai"]; r413 [label="413 / 400 :\nlot abandonné"]; r503 [label="503 + Retry-After : lot gardé,\nrenvoyé entier (mêmes event_id)"];
+  a -> b -> c -> d -> e -> f; f -> ok [label="oui"];
+  edge [style=dashed];
+  a -> r401 [label="jeton inconnu, révoqué,\nexpiré, source désactivée"]; b -> r413 [label="trop gros / illisible"]; c -> r429 [label="débit dépassé"]; f -> r503 [label="non"];
+  {rank=same; a; r401} {rank=same; b; r413} {rank=same; c; r429} {rank=same; f; r503}
+  LEG [shape=plain, fontsize=12, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF"><tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>trait plein</td><td align="left">étape suivante</td></tr>
+    <tr><td>tirets</td><td align="left">réponse d'erreur, avec son effet chez l'agent Fluent Bit</td></tr>
+    <tr><td>losange</td><td align="left">décision</td></tr>
+    <tr><td bgcolor="#C8E6C9">vert</td><td align="left">réponse de succès</td></tr>
+  </table>>];
+  ok -> LEG [style=invis];
+}
