@@ -1,0 +1,31 @@
+digraph T {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Traitement d'une alerte reçue</b><br/> >, fontsize=22, dpi=200, nodesep=0.45, ranksep=0.4, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", width=3.6];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  lire [label="1. Lire l'alerte\n(consommateur durable « incident-builder »)"];
+  json [label="JSON lisible ?", shape=diamond, style=filled, width=2.2, height=0.9];
+  ctr [label="Conforme à alert/v1 ?\nSévérité conservable ?", shape=diamond, style=filled, width=2.6, height=1.0];
+  ins [label="2. INSERT dans incidents.alert_state\nstatut « nouvelle », clé alert_id\nON CONFLICT DO NOTHING", fillcolor="#F1F8E9", color="#558B2F"];
+  res [label="Ligne créée ?", shape=diamond, style=filled, width=2.2, height=0.9];
+  new [label="alerte enregistrée\ncompteur par sévérité", fillcolor="#F1F8E9", color="#558B2F"];
+  dup [label="doublon ignoré\ncompteur de doublons", fillcolor="#F1F8E9", color="#558B2F"];
+  ack [label="3. Valider la transaction,\npuis acquitter le message", fillcolor="#C8E6C9", color="#2E7D32"];
+  node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#90A4AE", width=2.6];
+  rej [label="Mise en file de rejet\ndès la 1re tentative\n(parse_error, validation_error)", color="#C62828", fontcolor="#C62828"];
+  rule [label="Règle absente de config.rules :\nrejet sans nouvelle tentative\n(make rules-load, puis dlq-replay)", color="#C62828", fontcolor="#C62828"];
+  down [label="PostgreSQL injoignable :\nnouvelle livraison (jusqu'à 5)\net lecture du flux suspendue", color="#F57F17", fontcolor="#E65100"];
+  lire -> json;
+  json -> ctr [label="oui"];
+  json -> rej [label="non", style=dotted, color="#C62828", fontcolor="#C62828"];
+  ctr -> ins [label="oui"];
+  ctr -> rej [label="non", style=dotted, color="#C62828", fontcolor="#C62828"];
+  ins -> res;
+  res -> new [label="oui"];
+  res -> dup [label="non"];
+  new -> ack; dup -> ack;
+  ins -> rule [style=dotted, color="#C62828", fontcolor="#C62828", label="clé étrangère"];
+  ins -> down [style=dashed, color="#F57F17", fontcolor="#E65100", label="coupure"];
+  {rank=same; ctr; rej;}
+  {rank=same; ins; rule;}
+  {rank=same; res; down;}
+}

@@ -278,7 +278,7 @@ Les **tests unitaires** restent dans chaque service (`services/<service>/tests/`
 ### 4.5 `docs/` et `scripts/`
 ```text
 docs/
-├── conception/           # C1 à C8
+├── conception/           # C1 à C15
 ├── architecture/         # ce document, sources des diagrammes (.puml, .dot)
 ├── decisions/            # fiches de décision : broker, état, schéma commun…
 ├── api/                  # contrat OpenAPI

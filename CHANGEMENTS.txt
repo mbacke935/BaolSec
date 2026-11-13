@@ -1,0 +1,9 @@
+BaolSec — fichiers code corrigés (cohérence C12–C23 ↔ C1–C11)
+=============================================================
+Extraire ce dossier par-dessus la racine du dépôt (mêmes chemins relatifs).
+
+SUPPRESSION À FAIRE À LA MAIN :
+  - docker/postgres/init.sql  → REMPLACÉ par docker/postgres/init.sh
+    (supprime init.sql ; compose.yaml monte désormais init.sh)
+
+Résumé des corrections : voir le message de conversation.

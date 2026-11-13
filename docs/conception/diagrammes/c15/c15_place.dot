@@ -1,0 +1,32 @@
+digraph P {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Place du service Incidents (C15)</b><br/> >, fontsize=22, dpi=200, nodesep=0.6, ranksep=0.6, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0"];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  det [label="detection-worker\n(C12, C14)"];
+  al [label="alerts", shape=cylinder, fillcolor="#E8F5E9", color="#2E7D32"];
+  inc [label="incident-builder\nC15 : état des alertes, commandes\nC16, C17 : incidents (à venir)", fillcolor="#BBDEFB", penwidth=2];
+  pg [label="PostgreSQL (svc_incidents)\nincidents.alert_state\nincidents.incident_commands", shape=cylinder, fillcolor="#FFF8E1", color="#F57F17"];
+  usr [label="acces.users\n(lecture : auteur,\nanalyste assigné)", shape=cylinder, fillcolor="#FFF8E1", color="#F57F17"];
+  api [label="api\n(C20)", style="rounded,dashed,filled", fillcolor="#FFFFFF"];
+  idx [label="indexing-worker\n(C19)", style="rounded,dashed,filled", fillcolor="#FFFFFF"];
+  dlq [label="dlq", shape=cds, style=filled, fillcolor="#FFF8E1", color="#F57F17"];
+  det -> al [arrowhead=onormal, label="Msg-Id = alert_id"];
+  al -> inc [arrowhead=onormal, label="consommateur durable\nincident-builder"];
+  al -> idx [arrowhead=onormal, style=dashed];
+  inc -> pg [arrowhead=normal, label="création « nouvelle »,\nmise à jour du statut"];
+  inc -> usr [style=dashed, arrowhead=normal];
+  api -> inc [arrowhead=normal, label="POST /commands\nstatut_alerte, assigner_alerte"];
+  api -> pg [style=dashed, arrowhead=normal, label="lecture (svc_api)"];
+  inc -> dlq [style=dotted, color="#C62828", fontcolor="#C62828", arrowhead=onormal, label="illisible, non conforme,\nrègle inconnue"];
+  LEG [shape=plain, fontsize=11, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Légende</b></td></tr>
+    <tr><td>pointe ouverte</td><td align="left">message par le broker</td></tr>
+    <tr><td>pointe pleine</td><td align="left">appel, lecture ou écriture directe</td></tr>
+    <tr><td>tirets</td><td align="left">lecture seule, ou service d'une carte ultérieure</td></tr>
+    <tr><td><font color="#C62828">pointillés rouges</font></td><td align="left">mise en file de rejet</td></tr>
+    <tr><td>cylindre jaune / vert</td><td align="left">stockage sur disque / flux du broker</td></tr>
+  </table>>];
+  {rank=same; inc; api;}
+  {rank=same; pg; usr; dlq;}
+  dlq -> LEG [style=invis];
+}

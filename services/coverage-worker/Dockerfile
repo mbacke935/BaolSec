@@ -1,9 +1,22 @@
-# Couverture — image non root (C2 ES-10). Fixer la version exacte de l'image avant la mise en production.
-FROM python:3.12-slim
-RUN useradd --create-home --uid 10001 baolsec
+# BaolSec — coverage-worker (C18)
+FROM python:3.12-slim AS base
 WORKDIR /app
-COPY pyproject.toml ./
-COPY src ./src
-RUN pip install --no-cache-dir .
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv==0.7.3
+
+COPY shared/python-common /app/shared/python-common
+RUN uv pip install --system --no-cache /app/shared/python-common[nats]
+
+COPY services/coverage-worker /app/service
+RUN uv pip install --system --no-cache /app/service
+
+RUN adduser --disabled-password --gecos "" baolsec
 USER baolsec
+
+EXPOSE 9105
 CMD ["python", "-m", "coverage.main"]

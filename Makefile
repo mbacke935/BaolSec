@@ -1,6 +1,7 @@
 .PHONY: help up down test broker-up broker-init broker-restart broker-reset test-broker bench-broker gateway-dev gateway-up test-gateway agents-up agents-check test-agents normalizer-up test-normalizer fetch-datasets bench-normalizer \
         dlq-list dlq-show dlq-replay dlq-purge dlq-monitor-up test-resilience \
-        db-up db-migrate db-seed db-psql db-reset test-db rules-load detection-up test-detection bench-detection
+        db-up db-migrate db-seed db-psql db-reset test-db rules-load detection-up test-detection bench-detection \
+        incidents-up test-incidents alerts-list alerts-count
 
 COMPOSE = docker compose --env-file .env -f infrastructure/compose/compose.yaml
 # Depuis la machine hôte, le broker est joint par le port publié sur 127.0.0.1.
@@ -44,6 +45,10 @@ help:
 	@echo "make detection-up   : passerelle + normalisation + PostgreSQL + détection (C12, C14)"
 	@echo "make test-detection : tests unitaires et d'intégration de la détection"
 	@echo "make bench-detection: débit de la détection (ENF-02)"
+	@echo "make incidents-up   : détection + service Incidents : état et suivi des alertes (C15)"
+	@echo "make test-incidents : tests unitaires et d'intégration du service Incidents (broker jetable)"
+	@echo "make alerts-list    : alertes les plus récentes (ARGS=\"--status nouvelle --severity critique --rule AUTH-001\")"
+	@echo "make alerts-count   : compteurs des alertes par statut et par sévérité"
 
 up:
 	$(COMPOSE) up -d
@@ -194,3 +199,35 @@ test-detection:
 
 bench-detection:
 	$(WITH_ENV) uv run --with nats-py==2.16.0 scripts/testing/bench_detection.py 20000
+
+incidents-up: detection-up
+	@grep -Eq '^INCIDENTS_COMMAND_TOKEN=.{32,}' .env || { echo "INCIDENTS_COMMAND_TOKEN absent ou trop court (32 caractères) dans .env : openssl rand -hex 32"; exit 1; }
+	$(COMPOSE) up -d --build --wait incident-builder
+
+# Les tests d'intégration vident les flux du broker : ils tournent sur un broker jetable (port 14222, même
+# configuration et même version que la pile), jamais sur celui de la pile. La base baolsec_incidents_test est
+# créée puis supprimée sur le PostgreSQL de la pile (make db-up).
+INCIDENTS_TEST_BROKER = baolsec-incidents-test-broker
+test-incidents:
+	cd services/incident-builder && uv run --extra dev pytest -q -o asyncio_default_fixture_loop_scope=function
+	@set -e; docker rm -f $(INCIDENTS_TEST_BROKER) >/dev/null 2>&1 || true; \
+	docker run -d --rm --name $(INCIDENTS_TEST_BROKER) -p 127.0.0.1:14222:4222 -e BROKER_TOKEN=test-token \
+	  -v "$$(pwd)/infrastructure/broker/nats-server.conf:/etc/nats/nats-server.conf:ro" \
+	  nats:2.15.2-alpine -c /etc/nats/nats-server.conf >/dev/null; \
+	trap 'docker rm -f $(INCIDENTS_TEST_BROKER) >/dev/null 2>&1' EXIT; \
+	until docker exec $(INCIDENTS_TEST_BROKER) wget -qO- http://localhost:8222/healthz >/dev/null 2>&1; do sleep 0.5; done; \
+	set -a; . ./.env; set +a; \
+	BROKER_URL=nats://localhost:14222 BROKER_TOKEN=test-token uv run --quiet --with nats-py==2.16.0 infrastructure/broker/init_broker.py; \
+	BROKER_URL=nats://localhost:14222 BROKER_TOKEN=test-token INCIDENTS_TEST_PURGE=yes TEST_POSTGRES_DSN=$(DB_ADMIN)/postgres \
+	  $(UV_TEST) --with alembic==1.16.5 --with sqlalchemy==2.0.43 --with "psycopg[binary]==3.3.8" --with pyyaml==6.0.2 \
+	  --with pydantic-settings==2.16.2 --with fastapi==0.162.0 --with uvicorn==0.54.0 --with prometheus-client==0.26.0 \
+	  --with psycopg-pool==3.3.3 --with jsonschema-rs==0.59.0 --with-editable services/incident-builder \
+	  --with-editable services/detection-worker \
+	  pytest -v -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function tests/integration/incidents
+
+# Consultation des alertes (compte administrateur de la base, en lecture seule) ; ARGS : voir incidents.cli --help
+alerts-list:
+	$(WITH_ENV) cd services/incident-builder && INCIDENTS_POSTGRES_DSN=$(DB_ADMIN)/baolsec uv run --quiet --extra dev python -m incidents.cli list $(ARGS)
+
+alerts-count:
+	$(WITH_ENV) cd services/incident-builder && INCIDENTS_POSTGRES_DSN=$(DB_ADMIN)/baolsec uv run --quiet --extra dev python -m incidents.cli count

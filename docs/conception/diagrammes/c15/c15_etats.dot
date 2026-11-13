@@ -1,0 +1,24 @@
+digraph E {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Cycle de vie d'une alerte (incidents.alert_state)</b><br/> >, fontsize=22, dpi=200, nodesep=2.6, ranksep=1.7, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=14, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", width=2.6, height=0.95];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  start [shape=circle, label="", style=filled, fillcolor="#37474F", width=0.25, height=0.25, fixedsize=true];
+  nouv [label=<<b>nouvelle</b><br/><font point-size="11">aucun analyste assigné</font>>];
+  clo [label=<<b>cloturee</b><br/><font point-size="11">dernier assigné conservé</font>>, fillcolor="#E8F5E9", color="#2E7D32"];
+  enc [label=<<b>en_cours</b><br/><font point-size="11">un analyste assigné</font>>, fillcolor="#FFF8E1", color="#F57F17"];
+  start -> nouv [label="  alerte reçue"];
+  nouv -> clo [label="statut cloturee\n(bruit, doublon évident)"];
+  nouv -> enc [label="statut en_cours\n(l'auteur est assigné)\nou assigner un analyste", tailport=s, headport=nw];
+  enc -> nouv [label="statut nouvelle ou retrait\nde l'assigné (retour\ndans la file)", tailport=w, headport=sw];
+  enc -> clo [label="statut cloturee\n(fin d'analyse)", tailport=ne, headport=sw];
+  clo -> enc [label="statut en_cours (réouverture,\nl'auteur est assigné)", tailport=se, headport=e];
+  LEG [shape=plain, fontsize=11, label=<<table border="1" cellborder="1" cellspacing="0" cellpadding="5" color="#90A4AE" bgcolor="#FFFFFF">
+    <tr><td colspan="2" bgcolor="#ECEFF1"><b>Notation</b></td></tr>
+    <tr><td>disque plein</td><td align="left">création de la ligne (service Incidents)</td></tr>
+    <tr><td>rectangle arrondi</td><td align="left">statut de l'alerte</td></tr>
+    <tr><td>flèche</td><td align="left">transition acceptée, avec la commande qui la déclenche</td></tr>
+    <tr><td colspan="2" align="left">Toute autre transition, ou redemander le statut actuel, est refusée<br align="left"/>(transition_interdite).<br align="left"/></td></tr>
+  </table>>];
+  {rank=same; nouv; clo;}
+  enc -> LEG [style=invis];
+}

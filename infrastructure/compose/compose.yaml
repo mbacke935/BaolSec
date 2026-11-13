@@ -191,6 +191,34 @@ services:
     stop_grace_period: 20s
     networks: [internal]
 
+  # --- Incidents : état et suivi des alertes (C15) -------------------------------------------
+  incident-builder:
+    build:
+      context: ../..
+      dockerfile: services/incident-builder/Dockerfile
+    environment:
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+      # Compte svc_incidents : seul écrivain du schéma incidents (C4 2.2)
+      INCIDENTS_POSTGRES_DSN: postgresql://svc_incidents:${SVC_INCIDENTS_PASSWORD}@postgresql:5432/baolsec
+      # Secret partagé avec l'API pour POST /commands (min. 32 caractères : openssl rand -hex 32).
+      # Vide = le service refuse de démarrer ; make incidents-up le contrôle avant.
+      INCIDENTS_COMMAND_TOKEN: ${INCIDENTS_COMMAND_TOKEN:-}
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    # Pas de port publié : l'API joint http://incident-builder:9000/commands sur le réseau interne.
+    restart: unless-stopped
+    stop_grace_period: 20s
+    networks: [internal]
+
   # --- Collecte (C7) : services de test, démarrés avec le profil « agents-test » -------------
   agent-test:
     profiles: ["agents-test"]

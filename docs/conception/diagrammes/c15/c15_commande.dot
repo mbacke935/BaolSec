@@ -1,0 +1,30 @@
+digraph C {
+  graph [rankdir=TB, fontname="DejaVu Sans", labelloc=t, label=<<b>Traitement d'une commande d'alerte (une transaction)</b><br/> >, fontsize=22, dpi=200, nodesep=0.45, ranksep=0.4, pad=0.3];
+  node [fontname="DejaVu Sans", fontsize=13, shape=box, style="rounded,filled", fillcolor="#E3F2FD", color="#1565C0", width=3.8];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#37474F"];
+  http [label="POST /commands\nsecret de l'API, contrat incident_command/v1"];
+  lock [label="1. Verrouiller la ligne alert_state\n(SELECT … FOR UPDATE)", fillcolor="#F1F8E9", color="#558B2F"];
+  found [label="Alerte connue ?", shape=diamond, style=filled, width=2.2, height=0.9];
+  seen [label="2. command_id déjà enregistré ?", shape=diamond, style=filled, width=3.0, height=0.9];
+  same [label="Même commande ?", shape=diamond, style=filled, width=2.4, height=0.9];
+  who [label="3. Auteur actif dans acces.users ?", shape=diamond, style=filled, width=3.0, height=0.9];
+  dec [label="4. Décider (cycle de vie) et valider l'analyste assigné", fillcolor="#F1F8E9", color="#558B2F"];
+  wr [label="5. Écrire alert_state (si acceptée)\net incident_commands (acceptée ou refusée)", fillcolor="#F1F8E9", color="#558B2F"];
+  ok [label="résultat « acceptee » ou « refusee »\nreplayed = false", fillcolor="#C8E6C9", color="#2E7D32"];
+  node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#90A4AE", width=2.8];
+  rp [label="Résultat enregistré renvoyé\nreplayed = true, rien n'est réappliqué"];
+  nf [label="refusee : cible_introuvable\n(non enregistrée)"];
+  bad [label="refusee : donnees_invalides\n(non enregistrée)"];
+  http -> lock -> found;
+  found -> seen [label="oui"];
+  found -> nf [label="non"];
+  seen -> same [label="oui"];
+  seen -> who [label="non"];
+  same -> rp [label="oui"];
+  same -> bad [label="non : command_id\nréutilisé"];
+  who -> dec [label="oui"];
+  who -> bad [label="non"];
+  dec -> wr -> ok;
+  {rank=same; found; nf;}
+  {rank=same; same; rp;}
+}
