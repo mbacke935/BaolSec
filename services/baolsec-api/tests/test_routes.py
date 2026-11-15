@@ -38,7 +38,7 @@ RULE_ROW = {
     "name": "Règle SSH Brute-force",
     "description": None,
     "logic": {"field": "event_type", "op": "eq", "value": "ssh_failed"},
-    "severity": "ELEVE",
+    "severity": "elevee",
     "enabled": True,
     "source_type": "syslog",
     "threshold": 5,
@@ -52,8 +52,8 @@ INCIDENT_ROW = {
     "id": uuid.uuid4(),
     "title": "Incident test",
     "description": None,
-    "state": "OUVERT",
-    "severity": "MOYEN",
+    "state": "ouvert",
+    "severity": "moyenne",
     "opened_at": NOW,
     "closed_at": None,
     "assigned_to": None,
@@ -62,14 +62,16 @@ INCIDENT_ROW = {
     "updated_at": NOW,
 }
 
+# AlertResponse (C4) : alert_id texte + état de triage (incidents.alert_state).
 ALERT_ROW = {
-    "id": uuid.uuid4(),
-    "incident_id": INCIDENT_ROW["id"],
+    "id": "auth-001:srv-auth-01:2026",
     "rule_id": RULE_ROW["id"],
-    "source_id": SOURCE_ROW["id"],
-    "severity": "ELEVE",
-    "title": "SSH Brute-force détecté",
-    "detail": {"attempts": 10},
+    "severity": "elevee",
+    "status": "nouvelle",
+    "assigned_to": None,
+    "incident_id": INCIDENT_ROW["id"],
+    "title": "Échecs de connexion répétés",
+    "detail": {},
     "fired_at": NOW,
 }
 
@@ -171,10 +173,12 @@ class TestIncidents:
         assert resp.status_code == 200
 
     def test_update_state_analyst_allowed(self, client, analyst_headers):
-        with patch("baolsec_api.database._pool", make_fake_pool([INCIDENT_ROW])):
+        # La commande est transmise au service Incidents : on mocke le client HTTP.
+        with patch("baolsec_api.database._pool", make_fake_pool([INCIDENT_ROW])), \
+             patch("baolsec_api.commandclient.send_command", AsyncMock(return_value={"result": "acceptee"})):
             resp = client.post(
                 f"/api/v1/incidents/{INCIDENT_ROW['id']}/status",
-                json={"state": "EN_COURS"},
+                json={"state": "en_cours"},
                 headers=analyst_headers,
             )
         assert resp.status_code == 200
@@ -183,19 +187,20 @@ class TestIncidents:
         with patch("baolsec_api.database._pool", make_fake_pool([INCIDENT_ROW])):
             resp = client.post(
                 f"/api/v1/incidents/{INCIDENT_ROW['id']}/status",
-                json={"state": "EN_COURS"},
+                json={"state": "en_cours"},
             )
         assert resp.status_code == 401
 
     def test_incident_timeline(self, client, analyst_headers):
         timeline_row = {
-            "id": uuid.uuid4(),
+            "id": 1,
             "incident_id": INCIDENT_ROW["id"],
-            "entry_type": "ALERTE",
+            "entry_type": "alert",
             "occurred_at": NOW,
+            "summary": "Alerte rattachée",
             "detail": {},
-            "source_id": None,
             "alert_id": None,
+            "event_id": None,
             "user_id": None,
         }
         with patch("baolsec_api.database._pool", make_fake_pool([timeline_row])):

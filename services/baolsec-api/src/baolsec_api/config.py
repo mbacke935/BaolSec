@@ -22,8 +22,11 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 15           # jeton d'accès (court)
     jwt_refresh_expire_minutes: int = 480  # jeton de renouvellement (8 h)
 
-    # Token de commande pour incident-builder
+    # Commandes vers le service Incidents (C5 §6) : appel HTTP interne authentifié
+    # par un secret partagé. L'API ne modifie jamais incidents/alertes directement.
     command_token: str = ""
+    incidents_command_url: str = "http://incident-builder:9104/commands"
+    incidents_command_timeout_s: float = 10.0
 
     # Supervision
     api_host: str = "0.0.0.0"

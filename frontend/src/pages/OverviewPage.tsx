@@ -9,10 +9,10 @@ import { incidents, alerts, coverage } from '../api/analyst';
 import { sevBadge, isActiveIncident, fmtCompact, fmtInt } from '../lib/ui';
 
 const SEV_BARS = [
-  { key: 'CRITIQUE', label: 'Critique', color: '#f05c68' },
-  { key: 'ELEVE', label: 'Élevée', color: undefined }, // vert par défaut
-  { key: 'MOYEN', label: 'Moyenne', color: '#eab45c' },
-  { key: 'FAIBLE', label: 'Faible', color: '#48a5ed' },
+  { key: 'critique', label: 'Critique', color: '#f05c68' },
+  { key: 'elevee', label: 'Élevée', color: undefined }, // vert par défaut
+  { key: 'moyenne', label: 'Moyenne', color: '#eab45c' },
+  { key: 'faible', label: 'Faible', color: '#48a5ed' },
 ] as const;
 
 export function OverviewPage() {
@@ -30,13 +30,13 @@ export function OverviewPage() {
   const sourcesOk = covList.filter((c) => c.state === 'ACTIVE').length;
   const srcName = new Map(covList.map((c) => [c.source_id, c.source_name]));
 
-  // Répartition des alertes par sévérité (FAIBLE regroupe INFO).
-  const counts: Record<string, number> = { CRITIQUE: 0, ELEVE: 0, MOYEN: 0, FAIBLE: 0 };
+  // Répartition des alertes par sévérité (4 niveaux ; « info » n'est pas produit par les règles).
+  const counts: Record<string, number> = { critique: 0, elevee: 0, moyenne: 0, faible: 0 };
   for (const a of alertList) {
-    if (a.severity === 'CRITIQUE') counts.CRITIQUE++;
-    else if (a.severity === 'ELEVE') counts.ELEVE++;
-    else if (a.severity === 'MOYEN') counts.MOYEN++;
-    else counts.FAIBLE++;
+    if (a.severity === 'critique') counts.critique++;
+    else if (a.severity === 'elevee') counts.elevee++;
+    else if (a.severity === 'moyenne') counts.moyenne++;
+    else counts.faible++;
   }
   const maxSev = Math.max(1, ...Object.values(counts));
 
@@ -53,7 +53,7 @@ export function OverviewPage() {
         <div className="kpi">
           <small>Alertes ouvertes</small>
           <strong>{alertQ.isLoading ? '…' : fmtInt(alertList.length)}</strong>
-          <span className="up">{counts.CRITIQUE} critique(s)</span>
+          <span className="up">{counts.critique} critique(s)</span>
         </div>
         <div className="kpi">
           <small>Incidents actifs</small>
@@ -131,7 +131,7 @@ export function OverviewPage() {
                     <td>{a.title}</td>
                     <td>{a.source_id ? (srcName.get(a.source_id) ?? a.source_id.slice(0, 8)) : '—'}</td>
                     <td><span className={b.cls}>{b.label}</span></td>
-                    <td>{a.incident_id ? 'Corrélée' : 'Nouvelle'}</td>
+                    <td>{a.status === 'cloturee' ? 'Clôturée' : a.status === 'en_cours' ? 'En cours' : 'Nouvelle'}</td>
                   </tr>
                 );
               })}

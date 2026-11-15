@@ -74,13 +74,13 @@ FAKE_SOURCE = {
 }
 FAKE_RULE = {
     "id": uuid.uuid4(), "name": "R1", "description": None,
-    "logic": {}, "severity": "MOYEN", "enabled": True,
+    "logic": {}, "severity": "moyenne", "enabled": True,
     "source_type": None, "threshold": None, "window_id": None,
     "version": 1, "created_at": NOW, "updated_at": NOW,
 }
 FAKE_INCIDENT = {
     "id": uuid.uuid4(), "title": "Inc", "description": None,
-    "state": "OUVERT", "severity": "MOYEN",
+    "state": "ouvert", "severity": "moyenne",
     "opened_at": NOW, "closed_at": None, "assigned_to": None,
     "metadata": {}, "created_at": NOW, "updated_at": NOW,
 }
@@ -96,8 +96,8 @@ FAKE_COVERAGE = {
     "received_count": 100, "normalized_count": 99, "evaluated_at": NOW,
 }
 FAKE_ALERT = {
-    "id": uuid.uuid4(), "incident_id": None, "rule_id": None,
-    "source_id": None, "severity": "MOYEN",
+    "id": "regle-001:src:2026", "rule_id": uuid.uuid4(), "severity": "moyenne",
+    "status": "nouvelle", "assigned_to": None, "incident_id": None,
     "title": "Alerte test", "detail": {}, "fired_at": NOW,
 }
 
@@ -163,11 +163,13 @@ class TestIncidentsRBAC:
             for h in (ADMIN, ANALYST):
                 assert client.get("/api/v1/incidents", headers=h).status_code == 200
 
-    def test_update_state_admin_analyst_allowed(self, client):
+    def test_update_state_analyst_only(self, client):
+        # C5 : les commandes sur les incidents sont réservées à l'Analyste.
         iid = FAKE_INCIDENT["id"]
-        body = {"state": "EN_COURS"}
-        with patch("baolsec_api.database._pool", make_pool([FAKE_INCIDENT])):
-            assert client.post(f"/api/v1/incidents/{iid}/status", json=body, headers=ADMIN).status_code == 200
+        body = {"state": "en_cours"}
+        with patch("baolsec_api.database._pool", make_pool([FAKE_INCIDENT])), \
+             patch("baolsec_api.commandclient.send_command", AsyncMock(return_value={"result": "acceptee"})):
+            assert client.post(f"/api/v1/incidents/{iid}/status", json=body, headers=ADMIN).status_code == 403
             assert client.post(f"/api/v1/incidents/{iid}/status", json=body, headers=ANALYST).status_code == 200
 
 

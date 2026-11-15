@@ -24,20 +24,29 @@ ROLE_DB_NAMES: dict[UserRole, str] = {
 ROLE_FROM_DB: dict[str, UserRole] = {name: role for role, name in ROLE_DB_NAMES.items()}
 
 
+# Cycle de vie de l'incident (C4 §5.3, enum incidents.incident_status) : 3 états.
 class IncidentState(str, Enum):
-    OUVERT = "OUVERT"
-    EN_COURS = "EN_COURS"
-    RESOLU = "RESOLU"
-    CLOS = "CLOS"
-    FAUX_POSITIF = "FAUX_POSITIF"
+    OUVERT = "ouvert"
+    EN_COURS = "en_cours"
+    CLOS = "clos"
+
+
+# État de triage d'une alerte (C4 §5.3, enum incidents.alert_status), distinct
+# du document d'alerte immuable d'OpenSearch.
+class AlertStatus(str, Enum):
+    NOUVELLE = "nouvelle"
+    EN_COURS = "en_cours"
+    CLOTUREE = "cloturee"
 
 
 class Severity(str, Enum):
-    INFO = "INFO"
-    FAIBLE = "FAIBLE"
-    MOYEN = "MOYEN"
-    ELEVE = "ELEVE"
-    CRITIQUE = "CRITIQUE"
+    # Sévérité d'alerte/règle (C4/C5, enum config.severity) : 4 niveaux. Le niveau
+    # « info » existe seulement pour la sévérité d'événement ECS (baolsec.severity.label),
+    # jamais produit par les règles actuelles (C15).
+    FAIBLE = "faible"
+    MOYENNE = "moyenne"
+    ELEVEE = "elevee"
+    CRITIQUE = "critique"
 
 
 class CoverageState(str, Enum):
@@ -105,7 +114,7 @@ class RuleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
     logic: dict[str, Any]
-    severity: Severity = Severity.MOYEN
+    severity: Severity = Severity.MOYENNE
     enabled: bool = True
     source_type: str | None = None
     threshold: int | None = Field(None, ge=1)
@@ -142,13 +151,16 @@ class IncidentStateUpdate(BaseModel):
 
 
 class AlertResponse(BaseModel):
-    id: uuid.UUID
-    incident_id: uuid.UUID | None
-    rule_id: uuid.UUID | None
-    source_id: uuid.UUID | None
+    # Le document d'alerte est immuable dans OpenSearch ; l'état de triage
+    # (status, assignation) vient de incidents.alert_state (C4). alert_id est du texte.
+    id: str
+    rule_id: uuid.UUID
     severity: Severity
-    title: str
-    detail: dict[str, Any]
+    status: AlertStatus
+    assigned_to: uuid.UUID | None = None
+    incident_id: uuid.UUID | None = None
+    title: str = ""
+    detail: dict[str, Any] = {}
     fired_at: datetime
 
 
@@ -167,14 +179,15 @@ class IncidentResponse(BaseModel):
 
 
 class TimelineEntryResponse(BaseModel):
-    id: uuid.UUID
+    id: int                       # incidents.incident_timeline.id (bigint identity)
     incident_id: uuid.UUID
     entry_type: str
     occurred_at: datetime
-    detail: dict[str, Any]
-    source_id: uuid.UUID | None
-    alert_id: uuid.UUID | None
-    user_id: uuid.UUID | None
+    summary: str = ""
+    detail: dict[str, Any] = {}
+    alert_id: str | None = None   # texte (déterministe)
+    event_id: str | None = None
+    user_id: uuid.UUID | None = None
 
 
 # ── Couverture ────────────────────────────────────────────────────────────────

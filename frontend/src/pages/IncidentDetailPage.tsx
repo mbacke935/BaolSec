@@ -5,7 +5,7 @@ import { incidents } from '../api/analyst';
 import type { IncidentState } from '../types/api';
 import { sevBadge, incidentState, fmtDateTime } from '../lib/ui';
 
-const STATES: IncidentState[] = ['OUVERT', 'EN_COURS', 'RESOLU', 'CLOS', 'FAUX_POSITIF'];
+const STATES: IncidentState[] = ['ouvert', 'en_cours', 'clos'];
 
 export function IncidentDetailPage() {
   const { id = '' } = useParams();

@@ -73,3 +73,12 @@ async def refresh(body: RefreshRequest):
         refresh_token=create_refresh_token(payload.sub, payload.email, payload.role),
         expires_in=access_ttl_seconds(),
     )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout():
+    """Fermeture de session (C5). Le jeton étant conservé en mémoire côté client
+    (C3), la déconnexion effective consiste à l'oublier ; la révocation serveur de
+    la session (acces.user_sessions) relève du modèle C4 et sera câblée avec la
+    création de session au login."""
+    return None

@@ -22,9 +22,10 @@ from opensearchpy import AsyncOpenSearch
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from . import auth
+from . import commandclient
 from .config import Settings
 from .database import close_pool, init_pool
-from .routers import alerts, auth as auth_router, coverage, incidents, rules, search, sources, users
+from .routers import admin, alerts, auth as auth_router, coverage, incidents, rules, search, sources, users
 
 
 # ── Logging JSON ──────────────────────────────────────────────────────────────
@@ -78,6 +79,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         expire_minutes=s.jwt_expire_minutes,
         refresh_expire_minutes=s.jwt_refresh_expire_minutes,
     )
+
+    # Commandes vers le service Incidents (C5 §6)
+    commandclient.configure(s.incidents_command_url, s.command_token, s.incidents_command_timeout_s)
 
     # OpenSearch
     os_client = AsyncOpenSearch(
@@ -136,7 +140,7 @@ def create_app() -> FastAPI:
     api_v1 = APIRouter(prefix="/api/v1")
     for r in (
         auth_router.router, sources.router, rules.router, incidents.router,
-        alerts.router, coverage.router, users.router, search.router,
+        alerts.router, coverage.router, users.router, search.router, admin.router,
     ):
         api_v1.include_router(r)
     app.include_router(api_v1)

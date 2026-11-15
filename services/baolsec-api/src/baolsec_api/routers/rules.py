@@ -1,10 +1,10 @@
-"""Routes règles de détection (C20).
+"""Routes règles de détection (C20), schéma C4 config.rules.
 
-GET    /rules          → liste
-POST   /rules          → créer (ADMIN)
-GET    /rules/{id}     → détail
-PUT    /rules/{id}     → modifier (ADMIN)
-DELETE /rules/{id}     → désactiver (ADMIN)
+GET /rules · POST /rules (ADMIN) · GET /rules/{id} · PUT /rules/{id} (ADMIN) ·
+DELETE /rules/{id} = désactivation (ADMIN).
+
+La définition versionnée (rule_versions.definition_yaml) n'est pas exposée ici ;
+l'activation/désactivation et les métadonnées de config.rules le sont.
 """
 from __future__ import annotations
 
@@ -20,8 +20,13 @@ from ..models import RuleCreate, RuleResponse, RuleUpdate, UserRole
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 
-_READ  = Depends(require_role(UserRole.ANALYST, UserRole.ADMIN))
+_READ = Depends(require_role(UserRole.ANALYST, UserRole.ADMIN))
 _WRITE = Depends(require_role(UserRole.ADMIN))
+
+_COLS = """id, name, description,
+           jsonb_build_object('rule_type', rule_type) AS logic,
+           severity, is_enabled AS enabled, current_version AS version,
+           created_at, updated_at"""
 
 
 @router.get("", response_model=list[RuleResponse])
@@ -32,14 +37,12 @@ async def list_rules(
     offset: int = Query(0, ge=0),
     enabled_only: bool = False,
 ):
-    q = "SELECT * FROM config.detection_rules"
-    args: list = []
+    q = f"SELECT {_COLS} FROM config.rules"
     if enabled_only:
-        q += " WHERE enabled = TRUE"
+        q += " WHERE is_enabled = TRUE"
     q += " ORDER BY name LIMIT %s OFFSET %s"
-    args.extend([limit, offset])
     async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(q, args)
+        await cur.execute(q, [limit, offset])
         return await cur.fetchall()
 
 
@@ -49,20 +52,19 @@ async def create_rule(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_WRITE,
 ):
-    import json
+    rule_type = str((body.logic or {}).get("rule_type", "simple"))
     async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            """INSERT INTO config.detection_rules
-               (name, description, enabled, severity, source_type, logic, threshold, window_id)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-               RETURNING *""",
-            (
-                body.name, body.description, body.enabled,
-                body.severity.value if body.severity else None,
-                body.source_type, json.dumps(body.logic),
-                body.threshold, body.window_id,
-            ),
-        )
+        try:
+            await cur.execute(
+                f"""INSERT INTO config.rules (name, description, rule_type, severity, is_enabled)
+                    VALUES (%s, %s, %s, %s, %s) RETURNING {_COLS}""",
+                (body.name, body.description, rule_type,
+                 body.severity.value if body.severity else "moyenne", body.enabled),
+            )
+        except Exception as exc:
+            if "unique" in str(exc).lower():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Nom de règle déjà utilisé")
+            raise
         return await cur.fetchone()
 
 
@@ -73,7 +75,7 @@ async def get_rule(
     _user=_READ,
 ):
     async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute("SELECT * FROM config.detection_rules WHERE id = %s", (rule_id,))
+        await cur.execute(f"SELECT {_COLS} FROM config.rules WHERE id = %s", (rule_id,))
         row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Règle introuvable")
@@ -87,26 +89,44 @@ async def update_rule(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_WRITE,
 ):
-    import json
-    updates = {k: v for k, v in body.model_dump(exclude_none=True).items()}
-    if not updates:
+    src = body.model_dump(exclude_none=True)
+    set_parts: list[str] = []
+    values: list = []
+    if "enabled" in src:
+        set_parts.append("is_enabled = %s"); values.append(src["enabled"])
+    if "severity" in src:
+        sev = src["severity"]
+        set_parts.append("severity = %s"); values.append(getattr(sev, "value", sev))
+    if "description" in src:
+        set_parts.append("description = %s"); values.append(src["description"])
+    if not set_parts:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Aucun champ à modifier")
-    # Sérialiser severity et logic
-    if "severity" in updates and updates["severity"] is not None:
-        updates["severity"] = updates["severity"].value if hasattr(updates["severity"], "value") else updates["severity"]
-    if "logic" in updates:
-        updates["logic"] = json.dumps(updates["logic"])
-    set_clause = ", ".join(f"{k} = %s" for k in updates)
-    values = list(updates.values()) + [rule_id]
+    values.append(rule_id)
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            f"UPDATE config.detection_rules SET {set_clause}, updated_at = NOW() WHERE id = %s RETURNING *",
+            f"UPDATE config.rules SET {', '.join(set_parts)}, updated_at = NOW() WHERE id = %s RETURNING {_COLS}",
             values,
         )
         row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Règle introuvable")
     return row
+
+
+@router.get("/{rule_id}/versions")
+async def rule_versions(
+    rule_id: uuid.UUID,
+    conn: Annotated[AsyncConnection, Depends(get_conn)],
+    _user=_READ,
+):
+    """Historique des versions d'une règle (C4 config.rule_versions, C5)."""
+    async with conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            """SELECT rule_id, version, checksum, definition_yaml, created_by, created_at
+                 FROM config.rule_versions WHERE rule_id = %s ORDER BY version DESC""",
+            (rule_id,),
+        )
+        return await cur.fetchall()
 
 
 @router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -117,7 +137,7 @@ async def disable_rule(
 ):
     async with conn.cursor() as cur:
         await cur.execute(
-            "UPDATE config.detection_rules SET enabled = FALSE, updated_at = NOW() WHERE id = %s RETURNING id",
+            "UPDATE config.rules SET is_enabled = FALSE, updated_at = NOW() WHERE id = %s RETURNING id",
             (rule_id,),
         )
         if await cur.fetchone() is None:

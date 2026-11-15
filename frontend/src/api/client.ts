@@ -1,12 +1,16 @@
 /**
- * Client Axios configuré pour l'API BaolSec.
- * Injecte le JWT depuis localStorage et renouvelle le jeton d'accès sur 401
- * via le jeton de renouvellement (C3/C5 : jetons courts + refresh).
+ * Client Axios de l'API BaolSec.
+ *
+ * Conforme à C3 (fiche 4.6) : le jeton est conservé **en mémoire**, jamais dans
+ * localStorage. Une actualisation de page impose donc une reconnexion — c'est le
+ * compromis de sécurité retenu (pas de vol de jeton via XSS). Le contrôle d'accès
+ * réel est effectué par l'API à chaque requête.
  */
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
-const TOKEN_KEY = 'baolsec_token';
-const REFRESH_KEY = 'baolsec_refresh';
+// Jetons en mémoire (perdus au rechargement de la page — voulu, C3).
+let accessToken: string | null = null;
+let refreshToken: string | null = null;
 
 export const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -14,26 +18,20 @@ export const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Intercepteur requête : injecter le jeton d'accès
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
   return config;
 });
 
-// Renouvellement du jeton d'accès (une tentative partagée à la fois)
+// Renouvellement du jeton d'accès (une tentative partagée à la fois).
 let refreshing: Promise<string | null> | null = null;
 
 async function tryRefresh(): Promise<string | null> {
-  const refresh = localStorage.getItem(REFRESH_KEY);
-  if (!refresh) return null;
+  if (!refreshToken) return null;
   try {
-    // Appel direct (hors apiClient) pour ne pas déclencher cet intercepteur.
     const { data } = await axios.post<{ access_token: string; refresh_token: string }>(
       '/api/v1/auth/refresh',
-      { refresh_token: refresh },
+      { refresh_token: refreshToken },
     );
     saveToken(data.access_token);
     saveRefreshToken(data.refresh_token);
@@ -43,7 +41,6 @@ async function tryRefresh(): Promise<string | null> {
   }
 }
 
-// Intercepteur réponse : sur 401, tenter un refresh puis rejouer la requête
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -61,22 +58,10 @@ apiClient.interceptors.response.use(
       window.location.href = '/login';
     }
     return Promise.reject(error);
-  }
+  },
 );
 
-export function saveToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function saveRefreshToken(token: string): void {
-  localStorage.setItem(REFRESH_KEY, token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_KEY);
-}
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
+export function saveToken(token: string): void { accessToken = token; }
+export function saveRefreshToken(token: string): void { refreshToken = token; }
+export function clearToken(): void { accessToken = null; refreshToken = null; }
+export function getToken(): string | null { return accessToken; }

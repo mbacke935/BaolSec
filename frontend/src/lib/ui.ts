@@ -6,29 +6,27 @@ import type { Severity, IncidentState } from '../types/api';
 
 export function sevBadge(sev: Severity | string): { cls: string; label: string } {
   switch (sev) {
-    case 'CRITIQUE': return { cls: 'sev', label: 'Critique' };
-    case 'ELEVE':    return { cls: 'sev med', label: 'Élevée' };
-    case 'MOYEN':    return { cls: 'sev med', label: 'Moyenne' };
-    case 'FAIBLE':   return { cls: 'sev low', label: 'Faible' };
-    case 'INFO':     return { cls: 'sev low', label: 'Info' };
+    case 'critique': return { cls: 'sev', label: 'Critique' };
+    case 'elevee':   return { cls: 'sev med', label: 'Élevée' };
+    case 'moyenne':  return { cls: 'sev med', label: 'Moyenne' };
+    case 'faible':   return { cls: 'sev low', label: 'Faible' };
+    case 'info':     return { cls: 'sev low', label: 'Info' };  // sévérité d'événement ECS
     default:         return { cls: 'sev low', label: String(sev) };
   }
 }
 
 export function incidentState(state: IncidentState | string): { cls: string; label: string } {
   switch (state) {
-    case 'OUVERT':       return { cls: 'state-pill warn', label: 'Ouvert' };
-    case 'EN_COURS':     return { cls: 'state-pill', label: 'En investigation' };
-    case 'RESOLU':       return { cls: 'state-pill mute', label: 'Résolu' };
-    case 'CLOS':         return { cls: 'state-pill mute', label: 'Clos' };
-    case 'FAUX_POSITIF': return { cls: 'state-pill bad', label: 'Faux positif' };
-    default:             return { cls: 'state-pill mute', label: String(state) };
+    case 'ouvert':   return { cls: 'state-pill warn', label: 'Ouvert' };
+    case 'en_cours': return { cls: 'state-pill', label: 'En investigation' };
+    case 'clos':     return { cls: 'state-pill mute', label: 'Clos' };
+    default:         return { cls: 'state-pill mute', label: String(state) };
   }
 }
 
 /** Un incident « actif » = ouvert ou en cours d'investigation. */
 export function isActiveIncident(state: string): boolean {
-  return state === 'OUVERT' || state === 'EN_COURS';
+  return state === 'ouvert' || state === 'en_cours';
 }
 
 /** Formatage d'un entier à la française : 128 459. */

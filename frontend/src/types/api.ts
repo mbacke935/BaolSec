@@ -4,14 +4,15 @@
 
 export type UserRole = 'ADMIN' | 'ANALYST';
 
-export type IncidentState =
-  | 'OUVERT'
-  | 'EN_COURS'
-  | 'RESOLU'
-  | 'CLOS'
-  | 'FAUX_POSITIF';
+// Cycle de vie de l'incident (C4 incidents.incident_status) : 3 états.
+export type IncidentState = 'ouvert' | 'en_cours' | 'clos';
 
-export type Severity = 'INFO' | 'FAIBLE' | 'MOYEN' | 'ELEVE' | 'CRITIQUE';
+// État de triage d'une alerte (C4 incidents.alert_status).
+export type AlertStatus = 'nouvelle' | 'en_cours' | 'cloturee';
+
+// Sévérité d'alerte/règle (C4/C5 config.severity) : 4 niveaux. « info » n'existe
+// que pour la sévérité d'événement ECS, jamais produite par les règles (C15).
+export type Severity = 'faible' | 'moyenne' | 'elevee' | 'critique';
 
 export type CoverageStateEnum =
   | 'INCONNUE'

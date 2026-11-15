@@ -1,15 +1,15 @@
-"""Routes état de couverture (C20).
+"""Routes état de couverture (C20), schéma C4 couverture.*.
 
-GET  /coverage           → état courant par source
-GET  /coverage/{id}      → détail d'une source (état + règles affectées)
-GET  /coverage/history   → historique des changements
+GET /coverage · GET /coverage/history · GET /coverage/{source_id}.
+L'état courant vient de couverture.coverage_state ; les compteurs sont agrégés
+depuis couverture.coverage_stats ; le nom de la source vient de config.sources.
 """
 from __future__ import annotations
 
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
@@ -20,6 +20,18 @@ router = APIRouter(prefix="/coverage", tags=["coverage"])
 
 _READ = Depends(require_role(UserRole.ANALYST, UserRole.ADMIN))
 
+_SELECT = """
+SELECT cs.source_id, s.name AS source_name, cs.state,
+       cs.last_received_at, cs.last_normalized_at AS last_processed_at,
+       COALESCE(st.received, 0) AS received_count,
+       COALESCE(st.normalized, 0) AS normalized_count,
+       cs.last_evaluated_at AS evaluated_at
+  FROM couverture.coverage_state cs
+  JOIN config.sources s ON s.id = cs.source_id
+  LEFT JOIN (SELECT source_id, SUM(received_count) AS received, SUM(normalized_count) AS normalized
+               FROM couverture.coverage_stats GROUP BY source_id) st ON st.source_id = cs.source_id
+"""
+
 
 @router.get("", response_model=list[CoverageStateResponse])
 async def list_coverage(
@@ -29,10 +41,7 @@ async def list_coverage(
     offset: int = Query(0, ge=0),
 ):
     async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            "SELECT * FROM couverture.coverage_state ORDER BY last_seen_at DESC NULLS LAST LIMIT %s OFFSET %s",
-            (limit, offset),
-        )
+        await cur.execute(_SELECT + " ORDER BY s.name LIMIT %s OFFSET %s", (limit, offset))
         return await cur.fetchall()
 
 
@@ -44,8 +53,7 @@ async def coverage_history(
     offset: int = Query(0, ge=0),
     source_id: uuid.UUID | None = None,
 ):
-    conds = []
-    args: list = []
+    conds, args = [], []
     if source_id:
         conds.append("source_id = %s"); args.append(source_id)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
@@ -62,12 +70,8 @@ async def get_coverage(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_READ,
 ):
-    from fastapi import HTTPException, status
     async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            "SELECT * FROM couverture.coverage_state WHERE source_id = %s",
-            (source_id,),
-        )
+        await cur.execute(_SELECT + " WHERE cs.source_id = %s", (source_id,))
         row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Couverture introuvable pour cette source")
