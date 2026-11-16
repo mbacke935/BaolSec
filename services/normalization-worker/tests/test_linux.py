@@ -110,3 +110,12 @@ def test_iptables_ipv6_sortant_sans_decision(norm):
     assert d["source"]["ip"] == "2001:db8::1" and d["network"] == {"transport": "icmp", "direction": "egress"}
     assert d["event"]["action"] == "connection_logged" and d["event"]["type"] == ["connection"]
     assert "rule" not in d
+
+
+@pytest.mark.parametrize(("prefix", "action", "transport"), [
+    ("REJECT", "connection_denied", "udp"),
+    ("ACCEPT", "connection_allowed", "tcp"),
+])
+def test_iptables_decisions_et_protocoles(norm, prefix, action, transport):
+    d = norm("linux", f"Nov  2 10:40:52 host kernel: {prefix} IN=eth0 OUT= SRC=10.0.0.2 DST=8.8.8.8 PROTO={transport.upper()} SPT=1 DPT=53")
+    assert d["event"]["action"] == action and d["event"]["outcome"] in {"failure", "success"} and d["network"]["transport"] == transport

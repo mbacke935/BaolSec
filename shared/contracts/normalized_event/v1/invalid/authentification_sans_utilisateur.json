@@ -22,6 +22,9 @@
   "host": {
     "name": "PC-WIN-COMPTA"
   },
+  "user": {
+    "name": ""
+  },
   "source": {
     "ip": "10.0.4.23",
     "port": 51240

@@ -42,6 +42,11 @@ def test_icmp_sans_ports(norm):
     assert d["message"].startswith("Connexion ICMP bloquée de 10.100.10.23 vers 224.0.0.1")
 
 
+def test_reject_tcp(norm):
+    d = norm("firewall", "<134>Jul  3 19:10:30 filterlog[1]: 7,,,1,em0,match,reject,out,4,0x0,,64,1,0,none,6,tcp,60,10.0.0.2,8.8.8.8,1000,443")
+    assert d["event"]["action"] == "connection_denied" and d["network"] == {"transport": "tcp", "direction": "egress"}
+
+
 @pytest.mark.parametrize("payload", [
     "<30>Jul  3 19:10:30 dhcpd[1234]: DHCPACK on 10.0.0.5 to aa:bb:cc:dd:ee:ff",   # autre programme pfSense
     "<134>Jul  3 19:10:30 filterlog[1]: 5,,,1,em0,match",                          # trop court

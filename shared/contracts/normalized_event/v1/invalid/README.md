@@ -10,3 +10,4 @@ Chaque fichier doit être **rejeté** par le schéma ; le test échoue s'il est 
 | `categorie_non_ecs.json` | event.category doit être une valeur autorisée par ECS |
 | `criticite_inconnue.json` | criticité hors de faible / moyenne / elevee / critique |
 | `severite_incoherente.json` | libellé et score de sévérité doivent correspondre |
+| `authentification_sans_utilisateur.json` | un utilisateur présent ne peut pas avoir un nom vide ; une authentification sans identité reste autorisée lorsque `user` est absent |
