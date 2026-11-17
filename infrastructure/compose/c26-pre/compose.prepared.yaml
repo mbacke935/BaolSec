@@ -182,6 +182,7 @@ services:
       NATS_URL: "nats://nats:4222"
       NATS_TOKEN: ${C26_NATS_TOKEN}
       OPENSEARCH_URL: "http://opensearch:9200"
+      NORMALIZED_DURABLE: "indexing-normalized"
     depends_on:
       broker-init: {condition: service_completed_successfully}
       opensearch: {condition: service_healthy}
@@ -194,6 +195,7 @@ services:
     environment:
       POSTGRES_DSN: "postgresql://svc_api:${C26_SVC_API_PASSWORD}@postgres:5432/baolsec"
       OPENSEARCH_URL: "http://opensearch:9200"
+      NORMALIZED_DURABLE: "indexing-normalized"
       JWT_SECRET: ${C26_JWT_SECRET}
       COMMAND_TOKEN: ${C26_COMMAND_TOKEN}
       INCIDENTS_COMMAND_URL: "http://incident-builder:9104/commands"

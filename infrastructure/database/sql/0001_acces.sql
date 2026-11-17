@@ -1,5 +1,5 @@
 -- Schéma acces (C4 4.1, 5.1) — écrivain : API
-CREATE SCHEMA acces;
+CREATE SCHEMA IF NOT EXISTS acces;
 CREATE TYPE acces.outcome AS ENUM ('succes', 'refus', 'echec');
 
 CREATE TABLE acces.roles (
