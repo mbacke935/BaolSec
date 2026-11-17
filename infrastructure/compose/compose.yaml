@@ -76,6 +76,32 @@ services:
     restart: unless-stopped
     networks: [internal]
 
+    # --- OpenSearch (C19) : moteur d'indexation et de recherche --------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      cluster.name: baolsec
+      node.name: opensearch-node1
+      discovery.type: single-node
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_PASSWORD:?OPENSEARCH_PASSWORD manquant dans .env}
+      plugins.security.ssl.http.enabled: "true"
+      plugins.security.ssl.http.pemcert_filepath: esnode.pem
+      plugins.security.ssl.http.pemkey_filepath: esnode-key.pem
+      plugins.security.ssl.http.pemtrustedcas_filepath: root-ca.pem
+      DISABLE_INSTALL_DEMO_CONFIG: "false"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    ports:
+      - "127.0.0.1:9200:9200"   # développement uniquement
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk -u admin:${OPENSEARCH_PASSWORD} https://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+    networks: [internal]
+
   db-migrate:
     build:
       context: ../
@@ -219,6 +245,55 @@ services:
     stop_grace_period: 20s
     networks: [internal]
 
+  # --- Indexation OpenSearch (C19) : NORMALIZED_EVENTS, ALERTS, INCIDENTS → OpenSearch ---------
+  indexing-worker:
+    build:
+      context: ../..
+      dockerfile: services/indexing-worker/Dockerfile
+    environment:
+      NATS_URL: nats://broker:4222
+      NATS_TOKEN: ${BROKER_TOKEN}
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      OPENSEARCH_USER: ${OPENSEARCH_USER:-admin}
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-}
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9106/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    stop_grace_period: 20s
+    networks: [internal]
+
+  # --- Couverture des sources (C17) : RAW_EVENTS, NORMALIZED_EVENTS → PostgreSQL --------------
+  coverage-worker:
+    build:
+      context: ../..
+      dockerfile: services/coverage-worker/Dockerfile
+    environment:
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+      # Compte svc_couverture : écrivain du schéma couverture, lecteur de config.sources (C4 2.2)
+      COVERAGE_POSTGRES_DSN: postgresql://svc_couverture:${SVC_COUVERTURE_PASSWORD}@postgresql:5432/baolsec
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
+      db-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    stop_grace_period: 20s
+    networks: [internal]
+
   # --- Collecte (C7) : services de test, démarrés avec le profil « agents-test » -------------
   agent-test:
     profiles: ["agents-test"]
@@ -272,6 +347,7 @@ volumes:
   postgres-data:
   agent-test-state:
   collector-state:
+  opensearch-data:
 
 networks:
   internal:

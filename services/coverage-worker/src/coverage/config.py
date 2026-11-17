@@ -16,9 +16,9 @@ class Settings(BaseSettings):
 
     # Flux NATS consommés (C3 W6)
     raw_stream: str = "RAW_EVENTS"
-    raw_durable: str = "coverage-worker-raw"
+    raw_durable: str = "coverage-raw"
     normalized_stream: str = "NORMALIZED_EVENTS"
-    normalized_durable: str = "coverage-worker-norm"
+    normalized_durable: str = "coverage-normalized"
     fetch_batch: int = Field(100, ge=1, le=1000)
 
     # PostgreSQL : compte svc_couverture (C4 2.2, 0005_comptes.sql)

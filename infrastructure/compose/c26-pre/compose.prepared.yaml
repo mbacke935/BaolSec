@@ -1,0 +1,239 @@
+# C26-PRE — pile d'integration isolee. Ne pas demarrer sans autorisation.
+name: baolsec-c26
+
+x-worker-build: &worker-build
+  context: ../../..
+
+services:
+  nats:
+    container_name: baolsec-c26-nats
+    image: nats:2.15.2-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222", "--auth", "${C26_NATS_TOKEN}"]
+    ports: ["127.0.0.1:14222:4222", "127.0.0.1:18222:8222"]
+    volumes: ["baolsec-c26-nats-data:/data"]
+    networks: [c26-internal]
+    mem_limit: 192m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  postgres:
+    container_name: baolsec-c26-postgres
+    image: postgres:17-alpine
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=60"]
+    environment:
+      POSTGRES_DB: baolsec
+      POSTGRES_USER: baolsec
+      POSTGRES_PASSWORD: ${C26_POSTGRES_PASSWORD}
+      SVC_API_PASSWORD: ${C26_SVC_API_PASSWORD}
+      SVC_PASSERELLE_PASSWORD: ${C26_SVC_PASSERELLE_PASSWORD}
+      SVC_NORMALISATION_PASSWORD: ${C26_SVC_NORMALISATION_PASSWORD}
+      SVC_DETECTION_PASSWORD: ${C26_SVC_DETECTION_PASSWORD}
+      SVC_INCIDENTS_PASSWORD: ${C26_SVC_INCIDENTS_PASSWORD}
+      SVC_COUVERTURE_PASSWORD: ${C26_SVC_COUVERTURE_PASSWORD}
+    ports: ["127.0.0.1:15432:5432"]
+    volumes:
+      - baolsec-c26-postgres-data:/var/lib/postgresql/data
+      - ../../../docker/postgres/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+    networks: [c26-internal]
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baolsec -d baolsec"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  broker-init:
+    container_name: baolsec-c26-broker-init
+    build: {context: ../.., dockerfile: broker/Dockerfile}
+    environment:
+      BROKER_URL: "nats://nats:4222"
+      BROKER_TOKEN: ${C26_NATS_TOKEN}
+      BROKER_TOPOLOGY: /app/broker/topology.c26.json
+    volumes: ["./topology.c26.json:/app/broker/topology.c26.json:ro"]
+    depends_on: {nats: {condition: service_healthy}}
+    networks: [c26-internal]
+    restart: "no"
+
+  db-migrate:
+    container_name: baolsec-c26-db-migrate
+    build: {context: ../.., dockerfile: database/Dockerfile}
+    environment:
+      DATABASE_ADMIN_URL: "postgresql+psycopg://baolsec:${C26_POSTGRES_PASSWORD}@postgres:5432/baolsec"
+      SVC_API_PASSWORD: ${C26_SVC_API_PASSWORD}
+      SVC_PASSERELLE_PASSWORD: ${C26_SVC_PASSERELLE_PASSWORD}
+      SVC_NORMALISATION_PASSWORD: ${C26_SVC_NORMALISATION_PASSWORD}
+      SVC_DETECTION_PASSWORD: ${C26_SVC_DETECTION_PASSWORD}
+      SVC_INCIDENTS_PASSWORD: ${C26_SVC_INCIDENTS_PASSWORD}
+      SVC_COUVERTURE_PASSWORD: ${C26_SVC_COUVERTURE_PASSWORD}
+    depends_on: {postgres: {condition: service_healthy}}
+    networks: [c26-internal]
+    restart: "no"
+
+  db-bootstrap:
+    container_name: baolsec-c26-db-bootstrap
+    build: {context: ../../.., dockerfile: infrastructure/compose/c26-pre/Dockerfile.bootstrap}
+    environment:
+      DATABASE_ADMIN_URL: "postgresql+psycopg://baolsec:${C26_POSTGRES_PASSWORD}@postgres:5432/baolsec"
+      SOURCES_FILE: /run/baolsec/c26-tls/sources.json
+      RULES_DIR: /app/rules
+    volumes:
+      - type: bind
+        source: ${C26_TLS_DIR}
+        target: /run/baolsec/c26-tls
+        read_only: true
+    depends_on: {db-migrate: {condition: service_completed_successfully}}
+    networks: [c26-internal]
+    restart: "no"
+
+  opensearch:
+    container_name: baolsec-c26-opensearch
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${C26_OPENSEARCH_PASSWORD}
+    ports: ["127.0.0.1:19200:9200"]
+    volumes: ["baolsec-c26-opensearch-data:/usr/share/opensearch/data"]
+    networks: [c26-internal]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  ingestion-gateway:
+    container_name: baolsec-c26-ingestion-gateway
+    build: {context: ../../.., dockerfile: services/ingestion-gateway/Dockerfile}
+    environment:
+      BROKER_URL: "nats://nats:4222"
+      BROKER_TOKEN: ${C26_NATS_TOKEN}
+      GATEWAY_POSTGRES_DSN: "postgresql://svc_passerelle:${C26_SVC_PASSERELLE_PASSWORD}@postgres:5432/baolsec"
+      GATEWAY_TLS_CERT: /run/baolsec/c26-tls/gateway.crt
+      GATEWAY_TLS_KEY: /run/baolsec/c26-tls/gateway.key
+      GATEWAY_SYSLOG_CLIENT_CA: /run/baolsec/c26-tls/sources-ca.crt
+    ports: ["127.0.0.1:18443:8443", "127.0.0.1:16514:6514"]
+    volumes:
+      - type: bind
+        source: ${C26_TLS_DIR}
+        target: /run/baolsec/c26-tls
+        read_only: true
+    depends_on:
+      nats: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      broker-init: {condition: service_completed_successfully}
+      db-bootstrap: {condition: service_completed_successfully}
+    networks: [c26-internal]
+    mem_limit: 160m
+
+  normalization-worker:
+    container_name: baolsec-c26-normalization-worker
+    build: {context: ../../.., dockerfile: services/normalization-worker/Dockerfile}
+    environment:
+      BROKER_URL: "nats://nats:4222"
+      BROKER_TOKEN: ${C26_NATS_TOKEN}
+      NORMALIZER_POSTGRES_DSN: "postgresql://svc_normalisation:${C26_SVC_NORMALISATION_PASSWORD}@postgres:5432/baolsec"
+    depends_on: {broker-init: {condition: service_completed_successfully}, db-bootstrap: {condition: service_completed_successfully}}
+    networks: [c26-internal]
+    mem_limit: 160m
+
+  detection-worker:
+    container_name: baolsec-c26-detection-worker
+    build: {context: ../../.., dockerfile: services/detection-worker/Dockerfile}
+    environment:
+      BROKER_URL: "nats://nats:4222"
+      BROKER_TOKEN: ${C26_NATS_TOKEN}
+      DETECTOR_POSTGRES_DSN: "postgresql://svc_detection:${C26_SVC_DETECTION_PASSWORD}@postgres:5432/baolsec"
+    depends_on: {broker-init: {condition: service_completed_successfully}, db-bootstrap: {condition: service_completed_successfully}}
+    networks: [c26-internal]
+    mem_limit: 160m
+
+  incident-builder:
+    container_name: baolsec-c26-incident-builder
+    build: {context: ../../.., dockerfile: services/incident-builder/Dockerfile}
+    environment:
+      BROKER_URL: "nats://nats:4222"
+      BROKER_TOKEN: ${C26_NATS_TOKEN}
+      INCIDENTS_POSTGRES_DSN: "postgresql://svc_incidents:${C26_SVC_INCIDENTS_PASSWORD}@postgres:5432/baolsec"
+      INCIDENTS_COMMAND_TOKEN: ${C26_COMMAND_TOKEN}
+    depends_on: {broker-init: {condition: service_completed_successfully}, db-bootstrap: {condition: service_completed_successfully}}
+    networks: [c26-internal]
+    mem_limit: 192m
+
+  coverage-worker:
+    container_name: baolsec-c26-coverage-worker
+    build: {context: ../../.., dockerfile: services/coverage-worker/Dockerfile}
+    environment:
+      BROKER_URL: "nats://nats:4222"
+      BROKER_TOKEN: ${C26_NATS_TOKEN}
+      COVERAGE_POSTGRES_DSN: "postgresql://svc_couverture:${C26_SVC_COUVERTURE_PASSWORD}@postgres:5432/baolsec"
+    depends_on: {broker-init: {condition: service_completed_successfully}, db-bootstrap: {condition: service_completed_successfully}}
+    networks: [c26-internal]
+    mem_limit: 160m
+
+  indexing-worker:
+    container_name: baolsec-c26-indexing-worker
+    build: {context: ../../.., dockerfile: services/indexing-worker/Dockerfile}
+    environment:
+      NATS_URL: "nats://nats:4222"
+      NATS_TOKEN: ${C26_NATS_TOKEN}
+      OPENSEARCH_URL: "http://opensearch:9200"
+    depends_on:
+      broker-init: {condition: service_completed_successfully}
+      opensearch: {condition: service_healthy}
+    networks: [c26-internal]
+    mem_limit: 192m
+
+  baolsec-api:
+    container_name: baolsec-c26-api
+    build: {context: ../../.., dockerfile: services/baolsec-api/Dockerfile}
+    environment:
+      POSTGRES_DSN: "postgresql://svc_api:${C26_SVC_API_PASSWORD}@postgres:5432/baolsec"
+      OPENSEARCH_URL: "http://opensearch:9200"
+      JWT_SECRET: ${C26_JWT_SECRET}
+      COMMAND_TOKEN: ${C26_COMMAND_TOKEN}
+      INCIDENTS_COMMAND_URL: "http://incident-builder:9104/commands"
+    ports: ["127.0.0.1:18000:8000"]
+    depends_on:
+      db-bootstrap: {condition: service_completed_successfully}
+      opensearch: {condition: service_healthy}
+      incident-builder: {condition: service_started}
+    networks: [c26-internal]
+    mem_limit: 192m
+
+  prometheus:
+    container_name: baolsec-c26-prometheus
+    image: prom/prometheus:v3.3.1
+    profiles: [observability]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=7d"]
+    ports: ["127.0.0.1:19090:9090"]
+    volumes: ["./prometheus.prepared.yml:/etc/prometheus/prometheus.yml:ro", "baolsec-c26-prometheus-data:/prometheus"]
+    networks: [c26-internal]
+    mem_limit: 192m
+
+  grafana:
+    container_name: baolsec-c26-grafana
+    image: grafana/grafana:11.6.1
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${C26_GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports: ["127.0.0.1:13001:3000"]
+    volumes: ["../../../docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro", "baolsec-c26-grafana-data:/var/lib/grafana"]
+    depends_on: {prometheus: {condition: service_started}}
+    networks: [c26-internal]
+    mem_limit: 192m
+
+networks:
+  c26-internal: {name: baolsec-c26-internal}
+volumes:
+  baolsec-c26-nats-data: {name: baolsec-c26-nats-data}
+  baolsec-c26-postgres-data: {name: baolsec-c26-postgres-data}
+  baolsec-c26-opensearch-data: {name: baolsec-c26-opensearch-data}
+  baolsec-c26-prometheus-data: {name: baolsec-c26-prometheus-data}
+  baolsec-c26-grafana-data: {name: baolsec-c26-grafana-data}

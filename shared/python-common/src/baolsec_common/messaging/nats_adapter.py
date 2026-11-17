@@ -48,7 +48,8 @@ class NatsSubscription:
     async def fetch(self, batch: int = 10, timeout: float = 5.0) -> list[NatsMessage]:
         try:
             msgs = await self._sub.fetch(batch=batch, timeout=timeout)
-        except NatsTimeout:
+        except asyncio.TimeoutError:
+            # Un délai sans message est un résultat normal pour un pull consumer.
             return []
         return [NatsMessage(m) for m in msgs]
 

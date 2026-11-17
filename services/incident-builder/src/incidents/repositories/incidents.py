@@ -110,6 +110,28 @@ async def lock_incident(conn: psycopg.AsyncConnection, incident_id: uuid.UUID) -
 
 # ------------------------------------------------------------------ incidents : écriture
 
+async def create_outbox_event(
+    conn: psycopg.AsyncConnection,
+    *,
+    incident_id: uuid.UUID,
+    event_type: str,
+    payload: dict,
+) -> None:
+    """Insère un événement Outbox dans la même transaction que la création/modification de l'incident.
+
+    Le publisher indépendant (OutboxPublisher) lira les lignes non publiées et les enverra
+    sur NATS/INCIDENTS avant de marquer published_at.  L'appelant ne doit PAS committer
+    la transaction avant le retour de cette fonction.
+
+    ``event_type`` : 'created' | 'updated'
+    """
+    await conn.execute(
+        "INSERT INTO incidents.incident_outbox (incident_id, event_type, payload) "
+        "VALUES (%s, %s, %s)",
+        (incident_id, event_type, Jsonb(payload)),
+    )
+
+
 async def create_incident(
     conn: psycopg.AsyncConnection,
     *,
@@ -119,18 +141,33 @@ async def create_incident(
     context: IncidentContext,
     opened_at: datetime,
 ) -> IncidentRow:
-    """Crée un incident avec le statut « ouvert »."""
+    """Crée un incident avec le statut « ouvert » et insère un événement Outbox dans la même transaction."""
     ctx = Jsonb(context.to_dict())
     await conn.execute(
         "INSERT INTO incidents.incidents (id, title, status, severity, correlation_context, opened_at, last_activity_at) "
         "VALUES (%s, %s, 'ouvert'::incidents.incident_status, %s::config.severity, %s, %s, %s)",
         (incident_id, title, severity, ctx, opened_at, opened_at),
     )
-    return IncidentRow(
+    row = IncidentRow(
         id=incident_id, title=title, status="ouvert", severity=severity,
         correlation_context=context.to_dict(), opened_at=opened_at,
         last_activity_at=opened_at, closed_at=None, assigned_to=None,
     )
+    await create_outbox_event(
+        conn,
+        incident_id=incident_id,
+        event_type="created",
+        payload={
+            "incident_id": str(incident_id),
+            "title": title,
+            "state": "ouvert",
+            "severity": severity,
+            "opened_at": opened_at.isoformat(),
+            "closed_at": None,
+            "last_activity_at": opened_at.isoformat(),
+        },
+    )
+    return row
 
 
 async def update_incident(
@@ -144,7 +181,7 @@ async def update_incident(
     closed_at: datetime | None = None,
     assigned_to: uuid.UUID | None | type[_UNSET] = _UNSET,
 ) -> None:
-    """Met à jour un ou plusieurs champs de l'incident (déjà verrouillé)."""
+    """Met à jour un ou plusieurs champs de l'incident (déjà verrouillé) et insère un événement Outbox."""
     sets: list[str] = []
     params: list = []
     if severity is not None:
@@ -171,6 +208,23 @@ async def update_incident(
     await conn.execute(
         f"UPDATE incidents.incidents SET {', '.join(sets)} WHERE id = %s", params
     )
+    # Lire l'état courant pour construire le snapshot Outbox.
+    updated = await get_incident(conn, incident_id)
+    if updated is not None:
+        await create_outbox_event(
+            conn,
+            incident_id=incident_id,
+            event_type="updated",
+            payload={
+                "incident_id": str(updated.id),
+                "title": updated.title,
+                "state": updated.status,
+                "severity": updated.severity,
+                "opened_at": updated.opened_at.isoformat(),
+                "closed_at": updated.closed_at.isoformat() if updated.closed_at else None,
+                "last_activity_at": updated.last_activity_at.isoformat(),
+            },
+        )
 
 
 # ------------------------------------------------------------------ incident_alerts

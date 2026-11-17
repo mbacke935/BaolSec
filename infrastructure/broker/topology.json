@@ -62,6 +62,17 @@
       ]
     },
     {
+      "name": "INCIDENTS",
+      "subjects": [
+        "incidents"
+      ],
+      "max_age": 604800,
+      "max_bytes": 2147483648,
+      "consumers": [
+        "indexing-incidents"
+      ]
+    },
+    {
       "name": "DLQ",
       "subjects": [
         "dlq.>"

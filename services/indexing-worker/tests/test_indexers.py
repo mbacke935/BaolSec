@@ -21,7 +21,7 @@ def _msg(data: dict) -> MagicMock:
     return m
 
 
-def _consumer(msgs: list) -> MagicMock:
+def _consumer(msgs: list, stop: asyncio.Event) -> MagicMock:
     c = MagicMock()
     fetched = False
 
@@ -29,8 +29,8 @@ def _consumer(msgs: list) -> MagicMock:
         nonlocal fetched
         if not fetched:
             fetched = True
+            stop.set()
             return msgs
-        await asyncio.sleep(0.1)
         return []
 
     c.fetch = fetch
@@ -48,14 +48,26 @@ class TestEventIndexer:
 
     async def test_indexe_evenement_valide(self, os_client):
         event = {
-            "source_id": "s1",
-            "event_id": "e1",
             "@timestamp": "2026-11-13T10:00:00Z",
-            "category": "auth",
+            "ecs": {"version": "9.5.0"},
+            "event": {
+                "id": "e1",
+                "kind": "event",
+                "category": ["authentication"],
+                "action": "ssh_login",
+                "outcome": "failure",
+            },
+            "message": "Échec de connexion SSH",
+            "baolsec": {
+                "contract": "normalized_event/v1",
+                "source": {"id": "s1"},
+                "received_at": "2026-11-13T10:00:00Z",
+                "timestamp_source": "original",
+                "severity": {"label": "faible", "score": 21},
+            },
         }
-        consumer = _consumer([_msg(event)])
         stop = asyncio.Event()
-        stop.set()
+        consumer = _consumer([_msg(event)], stop)
         indexer = EventIndexer(os_client)
         await indexer.run(consumer, stop)
         # Le buffer est flushé à l'arrêt
@@ -67,9 +79,8 @@ class TestEventIndexer:
         m.data = b"pas du json {"
         m.seq = 42
         m.ack = AsyncMock()
-        consumer = _consumer([m])
         stop = asyncio.Event()
-        stop.set()
+        consumer = _consumer([m], stop)
         await EventIndexer(os_client).run(consumer, stop)
         m.ack.assert_called_once()
 
@@ -91,9 +102,8 @@ class TestAlertIndexer:
             "fired_at": "2026-11-13T10:00:00Z",
         }
         msg = _msg(alert)
-        consumer = _consumer([msg])
         stop = asyncio.Event()
-        stop.set()
+        consumer = _consumer([msg], stop)
         await AlertIndexer(os_client).run(consumer, stop)
         msg.ack.assert_called_once()
 
@@ -101,9 +111,8 @@ class TestAlertIndexer:
         m = MagicMock()
         m.data = b"{"
         m.ack = AsyncMock()
-        consumer = _consumer([m])
         stop = asyncio.Event()
-        stop.set()
+        consumer = _consumer([m], stop)
         await AlertIndexer(os_client).run(consumer, stop)
         m.ack.assert_called_once()
 
@@ -128,9 +137,8 @@ class TestIncidentIndexer:
             "rule_ids": ["r1"],
         }
         msg = _msg(incident)
-        consumer = _consumer([msg])
         stop = asyncio.Event()
-        stop.set()
+        consumer = _consumer([msg], stop)
         await IncidentIndexer(os_client).run(consumer, stop)
         os_client.index_one.assert_called_once()
         call_args = os_client.index_one.call_args
@@ -141,8 +149,7 @@ class TestIncidentIndexer:
         m = MagicMock()
         m.data = b"}"
         m.ack = AsyncMock()
-        consumer = _consumer([m])
         stop = asyncio.Event()
-        stop.set()
+        consumer = _consumer([m], stop)
         await IncidentIndexer(os_client).run(consumer, stop)
         m.ack.assert_called_once()

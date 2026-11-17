@@ -15,9 +15,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "httpx==0.28.1", "jsonschema", "rfc3339-validator"]
 
-[tool.uv.sources]
-baolsec-common = { path = "../../shared/python-common", editable = true }
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

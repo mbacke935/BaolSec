@@ -30,7 +30,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from baolsec_api import auth as _auth
-from baolsec_api.main import create_app
 from baolsec_api.models import UserRole
 
 
@@ -102,9 +101,8 @@ FAKE_ALERT = {
 }
 
 
-@pytest.fixture(scope="module")
-def client():
-    app = create_app()
+@pytest.fixture
+def client(app):
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
@@ -232,5 +230,6 @@ class TestAuditLog:
 
     def test_no_audit_for_anonymous(self, client):
         """Les requêtes anonymes (401) ne génèrent pas d'entrée d'audit."""
-        resp = client.get("/api/v1/sources")
+        with patch("baolsec_api.database._pool", make_pool()):
+            resp = client.get("/api/v1/sources")
         assert resp.status_code == 401

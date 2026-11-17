@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Streams à consommer
     normalized_stream: str = "NORMALIZED_EVENTS"
-    normalized_durable: str = "indexing-normalized"
+    normalized_durable: str = "indexing-events"
     alerts_stream: str = "ALERTS"
     alerts_durable: str = "indexing-alerts"
     incidents_stream: str = "INCIDENTS"

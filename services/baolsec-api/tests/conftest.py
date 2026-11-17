@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -67,11 +69,19 @@ class FakeConn:
 
 # ── App fixture ───────────────────────────────────────────────────────────────
 
+@asynccontextmanager
+async def test_lifespan(_app) -> AsyncIterator[None]:
+    """Lifespan isolé : aucun accès aux services externes durant les tests."""
+    yield
+
+
 @pytest.fixture
 def app():
     """Crée une instance de l'app avec le pool mocké."""
     _auth.configure("test-secret-key-1234567890abcdef", expire_minutes=60)
-    return create_app()
+    test_app = create_app()
+    test_app.router.lifespan_context = test_lifespan
+    return test_app
 
 
 @pytest.fixture

@@ -10,9 +10,9 @@ Les deux trackers fonctionnent en mode fire-and-forget vis-à-vis des compteurs 
 si PostgreSQL est indisponible lors d'un message, le message est NAK (il sera relivré),
 et la lecture est suspendue jusqu'au retour de la base.
 
-Chaque message est attendu de la forme :
-  {"source_id": "<uuid>", "received_at": "<iso8601>", ...}
-  (les champs supplémentaires sont ignorés — seule la source_id et l'horodatage comptent)
+Format des messages attendus :
+  RAW_EVENTS      : {"source": {"id": "<uuid>", ...}, "received_at": "<iso8601>", ...}
+  NORMALIZED_EVENTS : {"baolsec": {"source": {"id": "<uuid>", ...}, "received_at": "<iso8601>"}, "@timestamp": "<iso8601>", ...}
 """
 from __future__ import annotations
 
@@ -38,7 +38,11 @@ def _parse_ts(value: str) -> datetime:
 
 
 class ReceptionTracker:
-    """Consomme le flux raw-events et met à jour last_received_at / received_count."""
+    """Consomme le flux raw-events et met à jour last_received_at / received_count.
+
+    Format attendu (raw_event/v1) :
+      { "source": {"id": "<uuid>", ...}, "received_at": "<iso8601>", ... }
+    """
 
     def __init__(self, db: Database):
         self._db = db
@@ -69,11 +73,13 @@ class ReceptionTracker:
                     break
 
     async def _handle(self, msg) -> bool:
-        """Traite un message ; retourne False si PostgreSQL était indisponible."""
+        """Traite un message raw_event/v1 ; retourne False si PostgreSQL était indisponible."""
         try:
             doc = json.loads(msg.data)
-            source_id = uuid.UUID(doc["source_id"])
-            received_at = _parse_ts(doc.get("received_at") or doc.get("timestamp", ""))
+            # raw_event/v1 : source à la racine, id dans source["id"]
+            source_id = uuid.UUID(doc["source"]["id"])
+            # received_at à la racine du raw event
+            received_at = _parse_ts(doc["received_at"])
         except Exception as exc:
             log.warning("ReceptionTracker : message illisible (%s), ignoré", exc)
             await msg.ack()
@@ -94,7 +100,11 @@ class ReceptionTracker:
 
 
 class ProcessingTracker:
-    """Consomme le flux normalized-events et met à jour last_processed_at / normalized_count."""
+    """Consomme le flux normalized-events et met à jour last_processed_at / normalized_count.
+
+    Format attendu (normalized_event/v1) :
+      { "@timestamp": "<iso8601>", "baolsec": {"source": {"id": "<uuid>", ...}, "received_at": "<iso8601>"}, ... }
+    """
 
     def __init__(self, db: Database):
         self._db = db
@@ -125,11 +135,13 @@ class ProcessingTracker:
                     break
 
     async def _handle(self, msg) -> bool:
-        """Traite un message ; retourne False si PostgreSQL était indisponible."""
+        """Traite un message normalized_event/v1 ; retourne False si PostgreSQL était indisponible."""
         try:
             doc = json.loads(msg.data)
-            source_id = uuid.UUID(doc["source_id"])
-            processed_at = _parse_ts(doc.get("processed_at") or doc.get("timestamp", ""))
+            # normalized_event/v1 : source dans baolsec.source
+            source_id = uuid.UUID(doc["baolsec"]["source"]["id"])
+            # @timestamp = horodatage de l'événement normalisé (toujours présent)
+            processed_at = _parse_ts(doc["@timestamp"])
         except Exception as exc:
             log.warning("ProcessingTracker : message illisible (%s), ignoré", exc)
             await msg.ack()

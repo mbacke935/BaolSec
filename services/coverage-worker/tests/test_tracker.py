@@ -24,15 +24,18 @@ NOW = datetime(2026, 11, 13, 10, 0, 0, tzinfo=timezone.utc)
 
 def _raw_msg(source_id=SRC_ID, received_at=NOW) -> bytes:
     return json.dumps({
-        "source_id": str(source_id),
+        "source": {"id": str(source_id)},
         "received_at": received_at.isoformat(),
     }).encode()
 
 
 def _norm_msg(source_id=SRC_ID, processed_at=NOW) -> bytes:
     return json.dumps({
-        "source_id": str(source_id),
-        "processed_at": processed_at.isoformat(),
+        "@timestamp": processed_at.isoformat(),
+        "baolsec": {
+            "source": {"id": str(source_id)},
+            "received_at": processed_at.isoformat(),
+        },
     }).encode()
 
 
