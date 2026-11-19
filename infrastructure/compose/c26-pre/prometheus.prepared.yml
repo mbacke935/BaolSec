@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels: {platform: baolsec-c26}
+scrape_configs:
+  - job_name: nats
+    metrics_path: /varz
+    static_configs: [{targets: ["nats:8222"]}]
+  - job_name: gateway
+    static_configs: [{targets: ["ingestion-gateway:9000"]}]
+  - job_name: normalization-worker
+    static_configs: [{targets: ["normalization-worker:9000"]}]
+  - job_name: detection-worker
+    static_configs: [{targets: ["detection-worker:9000"]}]
+  - job_name: incident-builder
+    static_configs: [{targets: ["incident-builder:9000"]}]
+  - job_name: coverage-worker
+    static_configs: [{targets: ["coverage-worker:9001"]}]
+  - job_name: indexing-worker
+    static_configs: [{targets: ["indexing-worker:9106"]}]
+  - job_name: baolsec-api
+    static_configs: [{targets: ["baolsec-api:9107"]}]
+  - job_name: prometheus
+    static_configs: [{targets: ["localhost:9090"]}]

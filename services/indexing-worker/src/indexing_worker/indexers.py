@@ -6,7 +6,10 @@ Trois indexeurs asynchrones :
   - IncidentIndexer: flux INCIDENTS         → index baolsec-incidents-YYYY.MM.DD
 
 Chaque message est un JSON. Les identifiants sont déterministes
-(source_id:event_id, alert_id, incident_id) pour garantir l'idempotence.
+(event_id, alert_id, incident_id) pour garantir l'idempotence.
+
+Les appels à opensearch-py (bibliothèque synchrone) sont délégués à
+loop.run_in_executor afin de ne pas bloquer la boucle asyncio.
 """
 from __future__ import annotations
 
@@ -37,7 +40,16 @@ async def _sleep(stop: asyncio.Event, seconds: float) -> None:
 
 
 class EventIndexer:
-    """Consomme NORMALIZED_EVENTS et indexe dans OpenSearch."""
+    """Consomme NORMALIZED_EVENTS et indexe dans OpenSearch.
+
+    Format normalized_event/v1 :
+      {
+        "@timestamp": "<iso8601>",
+        "event": {"id": "<uuid>", ...},
+        "baolsec": {"source": {"id": "<uuid>", ...}, ...},
+        ...
+      }
+    """
 
     def __init__(self, os_client: OpenSearchClient) -> None:
         self._os = os_client
@@ -66,12 +78,14 @@ class EventIndexer:
             for msg in msgs:
                 try:
                     doc = json.loads(msg.data)
-                    ts = doc.get("@timestamp") or doc.get("received_at") or datetime.now(timezone.utc).isoformat()
-                    doc_id = f"{doc.get('source_id','')}-{doc.get('event_id', msg.seq)}"
+                    # normalized_event/v1 : @timestamp toujours présent
+                    ts = doc.get("@timestamp") or datetime.now(timezone.utc).isoformat()
+                    # Identifiant déterministe : event.id (uuid stable de l'événement)
+                    event_id = doc["event"]["id"]
                     action = {
                         "_op_type": "index",
                         "_index": _today_index("baolsec-events"),
-                        "_id": doc_id,
+                        "_id": event_id,
                         "@timestamp": ts,
                         **{k: v for k, v in doc.items() if not k.startswith("_")},
                     }
@@ -86,7 +100,8 @@ class EventIndexer:
             await self._flush(buffer)
 
     async def _flush(self, buffer: list[dict]) -> None:
-        ok, err = self._os.bulk_index(buffer)
+        loop = asyncio.get_event_loop()
+        ok, err = await loop.run_in_executor(None, self._os.bulk_index, buffer)
         log.debug("EventIndexer : indexé %d événements (%d erreurs)", ok, err)
 
 
@@ -127,7 +142,8 @@ class AlertIndexer:
                     await msg.ack()
 
             if actions:
-                ok, err = self._os.bulk_index(actions)
+                loop = asyncio.get_event_loop()
+                ok, err = await loop.run_in_executor(None, self._os.bulk_index, actions)
                 log.debug("AlertIndexer : indexé %d alertes (%d erreurs)", ok, err)
 
 
@@ -161,19 +177,30 @@ class IncidentIndexer:
                         "incident_id":  incident_id,
                         "title":        doc.get("title", ""),
                         "description":  doc.get("description", ""),
-                        "state":        doc.get("state", "OUVERT"),
-                        "severity":     doc.get("severity", "MOYEN"),
+                        "state":        doc.get("state", "ouvert"),
+                        "severity":     doc.get("severity", "moyenne"),
                         "opened_at":    doc.get("opened_at"),
                         "closed_at":    doc.get("closed_at"),
+                        "last_activity_at": doc.get("last_activity_at"),
                         "alert_count":  doc.get("alert_count", 0),
                         "source_ids":   doc.get("source_ids", []),
                         "rule_ids":     doc.get("rule_ids", []),
                     }
-                    self._os.index_one(
-                        summary["_index"], summary["_id"],
+                    # Indexer AVANT d'acquitter : si OpenSearch échoue, le message
+                    # sera relivré par NATS (l'idempotence repose sur _id = incident_id).
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,
+                        self._os.index_one,
+                        summary["_index"],
+                        summary["_id"],
                         {k: v for k, v in summary.items() if not k.startswith("_")},
                     )
                     await msg.ack()
-                except Exception as exc:
-                    log.warning("IncidentIndexer : message illisible (%s), ignoré", exc)
+                except json.JSONDecodeError as exc:
+                    # Message illisible : on acquitte pour ne pas bloquer le flux.
+                    log.warning("IncidentIndexer : JSON invalide (%s), ignoré", exc)
                     await msg.ack()
+                except Exception as exc:
+                    # Erreur OpenSearch ou autre : on N'acquitte PAS pour permettre la relivraison.
+                    log.error("IncidentIndexer : échec d'indexation (%s), message non acquitté", exc)

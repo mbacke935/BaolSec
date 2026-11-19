@@ -1,5 +1,5 @@
 -- Schéma config (C4 4.2, 5.2) — écrivain : API
-CREATE SCHEMA config;
+CREATE SCHEMA IF NOT EXISTS config;
 CREATE TYPE config.source_type AS ENUM ('linux', 'windows', 'firewall', 'http');
 CREATE TYPE config.transport AS ENUM ('https', 'syslog');
 CREATE TYPE config.ingestion_mode AS ENUM ('direct', 'rejeu');

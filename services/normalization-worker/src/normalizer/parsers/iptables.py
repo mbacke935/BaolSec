@@ -41,7 +41,8 @@ def parse_message(message: str, observer_name: str | None, timestamp: datetime |
     nic_in, nic_out = fields.get("IN"), fields.get("OUT")
     direction = "ingress" if nic_in and not nic_out else "egress" if nic_out and not nic_in else "unknown"
 
-    doc: dict = {"event": {"category": ["network"], "type": types, "action": action, "outcome": "unknown",
+    outcome = "failure" if action == "connection_denied" else "success" if action == "connection_allowed" else "unknown"
+    doc: dict = {"event": {"category": ["network"], "type": types, "action": action, "outcome": outcome,
                            "provider": "kernel", "dataset": "iptables.log"}}
     put(doc, "observer.name", observer_name)
     put(doc, "observer.product", "iptables")

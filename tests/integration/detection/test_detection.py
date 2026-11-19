@@ -202,7 +202,7 @@ async def test_echecs_puis_succes_auth002():
     auth002 = [a for a in alerts if a["rule"]["id"] == "AUTH-002"]
     assert len(auth002) == 1, "5 échecs + 1 succès doit déclencher AUTH-002"
     ALERT.validate(auth002[0])
-    assert auth002[0]["severity"]["label"] == "critique" or auth002[0]["baolsec"]["severity"]["label"] == "critique"
+    assert auth002[0]["baolsec"]["severity"]["label"] == "critique"
 
 
 async def test_password_spraying_auth003():

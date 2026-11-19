@@ -260,6 +260,7 @@ async def test_evaluateur_appelle_evaluate_state_par_source(monkeypatch, source_
         captured.append(("history", kw["new_state"]))
 
     import coverage.evaluator as _ev
+    monkeypatch.setattr(_ev, "_now", lambda: NOW)
     monkeypatch.setattr(_ev, "list_sources", _fake_list_sources)
     monkeypatch.setattr(_ev, "get_coverage_state", _fake_get_state)
     monkeypatch.setattr(_ev, "upsert_coverage_state", _fake_upsert)
@@ -297,6 +298,7 @@ async def test_evaluateur_enregistre_transition(monkeypatch, source_active):
         history_calls.append({"prev": previous_state, "new": new_state, "reason": reason})
 
     import coverage.evaluator as _ev
+    monkeypatch.setattr(_ev, "_now", lambda: NOW)
     monkeypatch.setattr(_ev, "list_sources", _fake_list_sources)
     monkeypatch.setattr(_ev, "get_coverage_state", _fake_get_state)
     monkeypatch.setattr(_ev, "upsert_coverage_state", _fake_upsert)
@@ -332,6 +334,7 @@ async def test_evaluateur_pas_de_transition_si_etat_identique(monkeypatch, sourc
         history_calls.append(kw)
 
     import coverage.evaluator as _ev
+    monkeypatch.setattr(_ev, "_now", lambda: NOW)
     monkeypatch.setattr(_ev, "list_sources", _fake_list_sources)
     monkeypatch.setattr(_ev, "get_coverage_state", _fake_get_state)
     monkeypatch.setattr(_ev, "upsert_coverage_state", _fake_upsert)

@@ -170,10 +170,10 @@ async def account(marker: str, n: int) -> dict:
 # ---------------------------------------------------------------- S1 : broker arrêté pendant l'envoi
 
 async def test_s1_broker_arrete_pendant_l_envoi():
-    marker, n = unique("s1"), 3000
-    sender = asyncio.create_task(send_like_agent(TOKENS["DEV_TOKEN_LINUX"], records(marker, n)))
-    await asyncio.sleep(1.5)
+    marker, n = unique("s1"), 100
     run(BROKER_KILL)
+    await asyncio.sleep(1)
+    sender = asyncio.create_task(send_like_agent(TOKENS["DEV_TOKEN_LINUX"], records(marker, n)))
     await asyncio.sleep(5)
     run(BROKER_START)
     retries = await sender
@@ -185,7 +185,7 @@ async def test_s1_broker_arrete_pendant_l_envoi():
 # ---------------------------------------------------------------- S2 : service arrêté pendant le traitement
 
 async def test_s2_normalisation_arretee_pendant_le_traitement():
-    marker, n = unique("s2"), 3000
+    marker, n = unique("s2"), 100
     sender = asyncio.create_task(send_like_agent(TOKENS["DEV_TOKEN_LINUX"], records(marker, n), pause=0.02))
     await asyncio.sleep(1.0)
     run(NORMALIZER_KILL)

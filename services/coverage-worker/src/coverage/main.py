@@ -47,15 +47,13 @@ async def run(settings: Settings) -> None:
     supervision.install_signal_handlers = lambda: None
 
     # Consommateurs NATS
-    raw_consumer = await broker.subscribe_pull(
+    raw_consumer = await broker.subscribe(
         stream=settings.raw_stream,
         durable=settings.raw_durable,
-        batch=settings.fetch_batch,
     )
-    norm_consumer = await broker.subscribe_pull(
+    norm_consumer = await broker.subscribe(
         stream=settings.normalized_stream,
         durable=settings.normalized_durable,
-        batch=settings.fetch_batch,
     )
 
     stop_event = asyncio.Event()

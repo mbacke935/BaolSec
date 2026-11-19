@@ -63,20 +63,17 @@ async def run(settings: Settings) -> None:
 
     broker = await connect_broker(settings)
 
-    ev_consumer = await broker.subscribe_pull(
+    ev_consumer = await broker.subscribe(
         stream=settings.normalized_stream,
         durable=settings.normalized_durable,
-        batch=settings.fetch_batch,
     )
-    al_consumer = await broker.subscribe_pull(
+    al_consumer = await broker.subscribe(
         stream=settings.alerts_stream,
         durable=settings.alerts_durable,
-        batch=settings.fetch_batch,
     )
-    inc_consumer = await broker.subscribe_pull(
+    inc_consumer = await broker.subscribe(
         stream=settings.incidents_stream,
         durable=settings.incidents_durable,
-        batch=settings.fetch_batch,
     )
 
     stop_event = asyncio.Event()

@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(not ADMIN_DSN, reason="TEST_POSTGRES_DSN non dé
 TABLES = {
     "acces": {"roles", "permissions", "role_permissions", "users", "user_sessions", "audit_log"},
     "config": {"sources", "source_credentials", "rules", "rule_versions", "rule_requirements", "settings"},
-    "incidents": {"alert_state", "incidents", "incident_alerts", "incident_timeline", "incident_comments", "incident_commands"},
+    "incidents": {"alert_state", "incidents", "incident_alerts", "incident_timeline", "incident_comments", "incident_commands", "incident_outbox"},
     "couverture": {"coverage_state", "coverage_state_history", "coverage_stats", "coverage_affected_rules", "coverage_batches"},
 }
 
@@ -121,7 +121,7 @@ def test_retour_arriere_puis_reapplication(url):
         assert c.execute("SELECT count(*) FROM pg_namespace WHERE nspname = ANY(%s)", (list(TABLES),)).fetchone()[0] == 0
     alembic("upgrade head", url)
     with psycopg.connect(url) as c:
-        assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0005"
+        assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0006"
 
 
 # ---------------------------------------------------------------- contraintes (C4 4.5)

@@ -200,7 +200,7 @@ services:
 
   coverage-worker:
     build:
-      context: ..
+      context: .
       dockerfile: services/coverage-worker/Dockerfile
     <<: *restart-policy
     env_file: .env

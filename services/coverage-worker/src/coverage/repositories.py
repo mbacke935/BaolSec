@@ -84,7 +84,7 @@ class CoverageStateRow:
 async def list_sources(conn: psycopg.AsyncConnection) -> list[SourceConfig]:
     """Retourne toutes les sources actives et inactives (l'évaluateur décide)."""
     cur = await conn.execute(
-        "SELECT id, name, silence_threshold_s, expected_min_events_per_h, active "
+        "SELECT id, name, silence_threshold_s, expected_min_events_per_h, is_enabled AS active "
         "FROM config.sources ORDER BY name"
     )
     return [
@@ -96,7 +96,7 @@ async def list_sources(conn: psycopg.AsyncConnection) -> list[SourceConfig]:
 
 async def get_source_by_name(conn: psycopg.AsyncConnection, name: str) -> SourceConfig | None:
     cur = await conn.execute(
-        "SELECT id, name, silence_threshold_s, expected_min_events_per_h, active "
+        "SELECT id, name, silence_threshold_s, expected_min_events_per_h, is_enabled AS active "
         "FROM config.sources WHERE name = %s",
         (name,),
     )
@@ -107,17 +107,30 @@ async def get_source_by_name(conn: psycopg.AsyncConnection, name: str) -> Source
 
 # ------------------------------------------------------------------ couverture.coverage_state
 
-async def get_coverage_state(conn: psycopg.AsyncConnection, source_id: uuid.UUID) -> CoverageStateRow | None:
+async def get_coverage_state(
+    conn: psycopg.AsyncConnection,
+    source_id: uuid.UUID,
+) -> CoverageStateRow | None:
     cur = await conn.execute(
-        "SELECT source_id, state::text, last_received_at, last_processed_at, "
-        "received_count, normalized_count, evaluated_at "
-        "FROM couverture.coverage_state WHERE source_id = %s",
+        """
+        SELECT
+            cs.source_id,
+            cs.state::text,
+            cs.last_received_at,
+            cs.last_normalized_at AS last_processed_at,
+            COALESCE(SUM(st.received_count), 0)::bigint AS received_count,
+            COALESCE(SUM(st.normalized_count), 0)::bigint AS normalized_count,
+            cs.last_evaluated_at AS evaluated_at
+        FROM couverture.coverage_state cs
+        LEFT JOIN couverture.coverage_stats st
+            ON st.source_id = cs.source_id
+        WHERE cs.source_id = %s
+        GROUP BY cs.source_id
+        """,
         (source_id,),
     )
     row = await cur.fetchone()
-    if row is None:
-        return None
-    return CoverageStateRow(*row)
+    return CoverageStateRow(*row) if row is not None else None
 
 
 async def upsert_coverage_state(
@@ -131,23 +144,39 @@ async def upsert_coverage_state(
     normalized_count: int = 0,
     evaluated_at: datetime | None = None,
 ) -> None:
-    """Crée ou met à jour l'état de couverture d'une source."""
+    """Met à jour l'état courant sans déplacer les compteurs hors de coverage_stats."""
     await conn.execute(
         """
-        INSERT INTO couverture.coverage_state
-            (source_id, state, last_received_at, last_processed_at,
-             received_count, normalized_count, evaluated_at)
-        VALUES (%s, %s::couverture.coverage_state_enum, %s, %s, %s, %s, %s)
+        INSERT INTO couverture.coverage_state (
+            source_id, state, state_since,
+            last_received_at, last_normalized_at, last_evaluated_at
+        )
+        VALUES (
+            %s, %s::couverture.state, COALESCE(%s, now()),
+            %s, %s, COALESCE(%s, now())
+        )
         ON CONFLICT (source_id) DO UPDATE SET
-            state             = EXCLUDED.state,
-            last_received_at  = COALESCE(EXCLUDED.last_received_at, couverture.coverage_state.last_received_at),
-            last_processed_at = COALESCE(EXCLUDED.last_processed_at, couverture.coverage_state.last_processed_at),
-            received_count    = EXCLUDED.received_count,
-            normalized_count  = EXCLUDED.normalized_count,
-            evaluated_at      = EXCLUDED.evaluated_at
+            state = EXCLUDED.state,
+            state_since = CASE
+                WHEN couverture.coverage_state.state
+                     IS DISTINCT FROM EXCLUDED.state
+                THEN EXCLUDED.state_since
+                ELSE couverture.coverage_state.state_since
+            END,
+            last_received_at = COALESCE(
+                EXCLUDED.last_received_at,
+                couverture.coverage_state.last_received_at
+            ),
+            last_normalized_at = COALESCE(
+                EXCLUDED.last_normalized_at,
+                couverture.coverage_state.last_normalized_at
+            ),
+            last_evaluated_at = EXCLUDED.last_evaluated_at
         """,
-        (source_id, state, last_received_at, last_processed_at,
-         received_count, normalized_count, evaluated_at),
+        (
+            source_id, state, evaluated_at,
+            last_received_at, last_processed_at, evaluated_at,
+        ),
     )
 
 
@@ -157,15 +186,29 @@ async def bump_received(
     source_id: uuid.UUID,
     received_at: datetime,
 ) -> None:
-    """Incrémente received_count et met à jour last_received_at (ReceptionTracker)."""
+    """Enregistre une réception et incrémente le compteur horaire."""
     await conn.execute(
         """
-        INSERT INTO couverture.coverage_state
-            (source_id, state, last_received_at, received_count, normalized_count)
-        VALUES (%s, 'INCONNUE'::couverture.coverage_state_enum, %s, 1, 0)
+        INSERT INTO couverture.coverage_state (source_id, last_received_at)
+        VALUES (%s, %s)
         ON CONFLICT (source_id) DO UPDATE SET
-            last_received_at = GREATEST(EXCLUDED.last_received_at, couverture.coverage_state.last_received_at),
-            received_count   = couverture.coverage_state.received_count + 1
+            last_received_at = GREATEST(
+                couverture.coverage_state.last_received_at,
+                EXCLUDED.last_received_at
+            )
+        """,
+        (source_id, received_at),
+    )
+
+    await conn.execute(
+        """
+        INSERT INTO couverture.coverage_stats (
+            source_id, bucket_start, received_count
+        )
+        VALUES (%s, date_trunc('hour', %s::timestamptz), 1)
+        ON CONFLICT (source_id, bucket_start) DO UPDATE SET
+            received_count =
+                couverture.coverage_stats.received_count + 1
         """,
         (source_id, received_at),
     )
@@ -177,21 +220,33 @@ async def bump_processed(
     source_id: uuid.UUID,
     processed_at: datetime,
 ) -> None:
-    """Incrémente normalized_count et met à jour last_processed_at (ProcessingTracker)."""
+    """Enregistre une normalisation et incrémente le compteur horaire."""
     await conn.execute(
         """
-        INSERT INTO couverture.coverage_state
-            (source_id, state, last_processed_at, received_count, normalized_count)
-        VALUES (%s, 'INCONNUE'::couverture.coverage_state_enum, %s, 0, 1)
+        INSERT INTO couverture.coverage_state (source_id, last_normalized_at)
+        VALUES (%s, %s)
         ON CONFLICT (source_id) DO UPDATE SET
-            last_processed_at = GREATEST(EXCLUDED.last_processed_at, couverture.coverage_state.last_processed_at),
-            normalized_count  = couverture.coverage_state.normalized_count + 1
+            last_normalized_at = GREATEST(
+                couverture.coverage_state.last_normalized_at,
+                EXCLUDED.last_normalized_at
+            )
         """,
         (source_id, processed_at),
     )
 
+    await conn.execute(
+        """
+        INSERT INTO couverture.coverage_stats (
+            source_id, bucket_start, normalized_count
+        )
+        VALUES (%s, date_trunc('hour', %s::timestamptz), 1)
+        ON CONFLICT (source_id, bucket_start) DO UPDATE SET
+            normalized_count =
+                couverture.coverage_stats.normalized_count + 1
+        """,
+        (source_id, processed_at),
+    )
 
-# ------------------------------------------------------------------ couverture.coverage_state_history
 
 async def insert_state_history(
     conn: psycopg.AsyncConnection,
@@ -202,16 +257,25 @@ async def insert_state_history(
     reason: str,
     changed_at: datetime,
 ) -> None:
-    """Enregistre une transition d'état dans l'historique."""
+    """Enregistre une transition dans l'historique des états."""
     await conn.execute(
-        "INSERT INTO couverture.coverage_state_history "
-        "(source_id, previous_state, new_state, reason, changed_at) "
-        "VALUES (%s, %s::couverture.coverage_state_enum, %s::couverture.coverage_state_enum, %s, %s)",
-        (source_id, previous_state, new_state, reason, changed_at),
+        """
+        INSERT INTO couverture.coverage_state_history (
+            source_id, from_state, to_state, reason, changed_at
+        )
+        VALUES (
+            %s, %s::couverture.state, %s::couverture.state, %s, %s
+        )
+        """,
+        (
+            source_id,
+            previous_state or "INCONNUE",
+            new_state,
+            reason,
+            changed_at,
+        ),
     )
 
-
-# ------------------------------------------------------------------ couverture.coverage_affected_rules
 
 async def upsert_affected_rules(
     conn: psycopg.AsyncConnection,

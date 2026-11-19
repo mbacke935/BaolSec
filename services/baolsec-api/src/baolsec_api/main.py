@@ -167,7 +167,7 @@ app = create_app()
 if __name__ == "__main__":
     s = Settings()
     uvicorn.run(
-        "baolsec_api.main:app",
+        app,
         host="0.0.0.0",
         port=s.api_port,
         log_config=None,  # On utilise notre propre logging

@@ -16,6 +16,7 @@ from .config import Settings
 from .consumer import AlertConsumer, PostgresAlertSink
 from .contracts import Contracts
 from .health import create_app
+from .outbox import OutboxPublisher
 from .repositories import Database
 
 log = logging.getLogger("incidents")
@@ -39,6 +40,7 @@ async def run(settings: Settings) -> None:
     broker = await connect_broker(settings)
     consumer = AlertConsumer(broker, PostgresAlertSink(db), contracts, stream=settings.stream,
                              durable=settings.durable, batch=settings.fetch_batch)
+    outbox = OutboxPublisher(db, broker)
     app = create_app(broker_connected=lambda: broker.connected, db_ready=db.ping,
                      commands=CommandService(db), contracts=contracts, command_token=settings.command_token)
     supervision = uvicorn.Server(uvicorn.Config(app, host=settings.metrics_host, port=settings.metrics_port,
@@ -48,13 +50,21 @@ async def run(settings: Settings) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, consumer.stop)
+        loop.add_signal_handler(sig, outbox.stop)
+    outbox_task = asyncio.create_task(outbox.run(), name="outbox-publisher")
     server = asyncio.create_task(supervision.serve(), name="supervision")
-    log.info("service Incidents démarré : %s/%s → incidents.alert_state, commandes sur le port %d",
+    log.info("service Incidents démarré : %s/%s → incidents.alert_state, outbox → INCIDENTS, commandes sur le port %d",
              settings.stream, settings.durable, settings.metrics_port)
     try:
         await consumer.run()
     finally:
         log.info("arrêt demandé")
+        outbox.stop()
+        try:
+            await asyncio.wait_for(outbox_task, timeout=10.0)
+        except asyncio.TimeoutError:
+            log.warning("OutboxPublisher : délai d'arrêt dépassé, annulation")
+            outbox_task.cancel()
         supervision.should_exit = True
         await server
         await broker.close()

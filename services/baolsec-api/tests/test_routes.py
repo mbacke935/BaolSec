@@ -117,7 +117,8 @@ class TestSources:
         assert isinstance(data, list)
 
     def test_list_sources_requires_auth(self, client):
-        resp = client.get("/api/v1/sources")
+        with patch("baolsec_api.database._pool", make_fake_pool([])):
+            resp = client.get("/api/v1/sources")
         assert resp.status_code == 401
 
     def test_create_source_admin_only(self, client, analyst_headers, admin_headers):
