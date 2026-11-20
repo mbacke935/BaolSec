@@ -23,6 +23,26 @@ export type CoverageStateEnum =
 
 // ── Sources ──────────────────────────────────────────────────────────────────
 
+export type SourceTransport = 'https' | 'syslog';
+export type SourceIngestionMode = 'direct' | 'rejeu';
+export type SourceCriticality = 'faible' | 'moyenne' | 'elevee' | 'critique';
+
+export interface SourceConfig {
+  transport: SourceTransport;
+  ingestion_mode: SourceIngestionMode;
+  host: string | null;
+  criticality: SourceCriticality | null;
+  expected_min_events_per_h: number | null;
+}
+
+export interface SourceConfigUpdate {
+  transport?: SourceTransport;
+  ingestion_mode?: SourceIngestionMode;
+  host?: string | null;
+  criticality?: SourceCriticality | null;
+  expected_min_events_per_h?: number | null;
+}
+
 export interface Source {
   id: string;
   name: string;
@@ -30,7 +50,7 @@ export interface Source {
   type: string;
   active: boolean;
   silence_threshold_s: number;
-  config: Record<string, unknown>;
+  config: SourceConfig;
   created_at: string;
   updated_at: string;
 }
@@ -41,7 +61,7 @@ export interface SourceCreate {
   type: string;
   active?: boolean;
   silence_threshold_s?: number;
-  config?: Record<string, unknown>;
+  config?: SourceConfig;
 }
 
 export interface SourceUpdate {
@@ -49,7 +69,23 @@ export interface SourceUpdate {
   type?: string;
   active?: boolean;
   silence_threshold_s?: number;
-  config?: Record<string, unknown>;
+  config?: SourceConfigUpdate;
+}
+
+export interface SourceCredential {
+  id: string;
+  credential_type: 'token' | 'client_cert';
+  cert_fingerprint: string | null;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface SourceCredentialRotation {
+  credential_id: string;
+  created_at: string;
+  token: string;
+  note: string;
 }
 
 // ── Règles ───────────────────────────────────────────────────────────────────
