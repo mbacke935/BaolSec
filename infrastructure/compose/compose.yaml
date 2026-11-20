@@ -294,6 +294,48 @@ services:
     stop_grace_period: 20s
     networks: [internal]
 
+    # --- API centrale BaolSec : authentification, gestion et consultation ------------------------
+  baolsec-api:
+    build:
+      context: ../..
+      dockerfile: services/baolsec-api/Dockerfile
+    environment:
+      POSTGRES_DSN: postgresql://svc_api:${SVC_API_PASSWORD}@postgresql:5432/baolsec
+      OPENSEARCH_URL: https://opensearch:9200
+      OPENSEARCH_USER: ${OPENSEARCH_USER:-admin}
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: "15"
+      JWT_REFRESH_EXPIRE_MINUTES: "480"
+      COMMAND_TOKEN: ${INCIDENTS_COMMAND_TOKEN}
+      INCIDENTS_COMMAND_URL: http://incident-builder:9000/commands
+      INCIDENTS_COMMAND_TIMEOUT_S: "10"
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      METRICS_HOST: 0.0.0.0
+      METRICS_PORT: "9107"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      postgresql:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      incident-builder:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    networks: [internal]  
+
   # --- Collecte (C7) : services de test, démarrés avec le profil « agents-test » -------------
   agent-test:
     profiles: ["agents-test"]
