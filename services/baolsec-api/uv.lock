@@ -272,6 +272,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "opensearch-py", extra = ["async"] },
     { name = "passlib", extra = ["argon2"] },
     { name = "prometheus-client" },
@@ -294,6 +295,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = "==0.162.0" },
+    { name = "httpx", specifier = "==0.28.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = "==0.28.1" },
     { name = "opensearch-py", extras = ["async"], specifier = "==2.8.0" },
     { name = "passlib", extras = ["argon2"], specifier = "==1.7.4" },

@@ -120,7 +120,7 @@ class TestSourcesRBAC:
             assert client.get("/api/v1/sources").status_code == 401
 
     def test_post_only_admin(self, client):
-        payload = {"name": "FW-B", "type": "syslog"}
+        payload = {"name": "FW-B", "type": "firewall", "config": {"transport": "syslog"}}
         with patch("baolsec_api.database._pool", make_pool([FAKE_SOURCE])):
             assert client.post("/api/v1/sources", json=payload, headers=ADMIN).status_code == 201
             assert client.post("/api/v1/sources", json=payload, headers=ANALYST).status_code == 403

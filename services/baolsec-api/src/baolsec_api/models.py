@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -79,21 +79,37 @@ class RefreshRequest(BaseModel):
 
 # ── Sources ───────────────────────────────────────────────────────────────────
 
+class SourceConfig(BaseModel):
+    transport: Literal["https", "syslog"] = "https"
+    ingestion_mode: Literal["direct", "rejeu"] = "direct"
+    host: str | None = None
+    criticality: Literal["faible", "moyenne", "elevee", "critique"] | None = None
+    expected_min_events_per_h: int | None = Field(None, ge=0)
+
+
+class SourceConfigUpdate(BaseModel):
+    transport: Literal["https", "syslog"] | None = None
+    ingestion_mode: Literal["direct", "rejeu"] | None = None
+    host: str | None = None
+    criticality: Literal["faible", "moyenne", "elevee", "critique"] | None = None
+    expected_min_events_per_h: int | None = Field(None, ge=0)
+
+
 class SourceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = None
-    type: str
+    type: Literal["linux", "windows", "firewall", "http"]
     active: bool = True
-    silence_threshold_s: int = Field(300, ge=0)
-    config: dict[str, Any] = {}
+    silence_threshold_s: int = Field(300, ge=1)
+    config: SourceConfig = Field(default_factory=SourceConfig)
 
 
 class SourceUpdate(BaseModel):
     description: str | None = None
-    type: str | None = None
+    type: Literal["linux", "windows", "firewall", "http"] | None = None
     active: bool | None = None
-    silence_threshold_s: int | None = Field(None, ge=0)
-    config: dict[str, Any] | None = None
+    silence_threshold_s: int | None = Field(None, ge=1)
+    config: SourceConfigUpdate | None = None
 
 
 class SourceResponse(BaseModel):

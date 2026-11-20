@@ -29,7 +29,8 @@ _WRITE = Depends(require_role(UserRole.ADMIN))
 _COLS = """id, name, description, source_type AS type, is_enabled AS active,
            silence_threshold_s,
            jsonb_build_object('transport', transport, 'ingestion_mode', ingestion_mode,
-                              'host', host, 'criticality', criticality) AS config,
+                              'host', host, 'criticality', criticality,
+                              'expected_min_events_per_h', expected_min_events_per_h) AS config,
            created_at, updated_at"""
 
 
@@ -56,20 +57,21 @@ async def create_source(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_WRITE,
 ):
-    cfg = body.config or {}
+    cfg = body.config.model_dump()
     async with conn.cursor(row_factory=dict_row) as cur:
         try:
             await cur.execute(
                 f"""INSERT INTO config.sources
                     (name, description, source_type, transport, ingestion_mode, host,
-                     criticality, silence_threshold_s, is_enabled)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     criticality, silence_threshold_s, expected_min_events_per_h, is_enabled)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING {_COLS}""",
                 (
                     body.name, body.description, body.type,
                     cfg.get("transport", "https"), cfg.get("ingestion_mode", "direct"),
                     cfg.get("host"), cfg.get("criticality"),
-                    body.silence_threshold_s, body.active,
+                    body.silence_threshold_s, cfg.get("expected_min_events_per_h"),
+                    body.active,
                 ),
             )
         except Exception as exc:
@@ -100,7 +102,7 @@ async def update_source(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_WRITE,
 ):
-    src = body.model_dump(exclude_none=True)
+    src = body.model_dump(exclude_unset=True)
     # Traduction des champs de la requête vers les colonnes C4.
     col_map = {"type": "source_type", "active": "is_enabled",
                "silence_threshold_s": "silence_threshold_s", "description": "description"}
@@ -110,7 +112,8 @@ async def update_source(
         if key in src:
             set_parts.append(f"{col} = %s"); values.append(src[key])
     cfg = src.get("config") or {}
-    for cfg_key in ("transport", "ingestion_mode", "host", "criticality"):
+    for cfg_key in ("transport", "ingestion_mode", "host", "criticality",
+                     "expected_min_events_per_h"):
         if cfg_key in cfg:
             set_parts.append(f"{cfg_key} = %s"); values.append(cfg[cfg_key])
     if not set_parts:

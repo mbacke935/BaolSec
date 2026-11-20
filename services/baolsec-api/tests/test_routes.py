@@ -122,7 +122,7 @@ class TestSources:
         assert resp.status_code == 401
 
     def test_create_source_admin_only(self, client, analyst_headers, admin_headers):
-        payload = {"name": "FW-B", "type": "syslog"}
+        payload = {"name": "FW-B", "type": "firewall", "config": {"transport": "syslog"}}
         with patch("baolsec_api.database._pool", make_fake_pool([SOURCE_ROW])):
             resp_analyst = client.post("/api/v1/sources", json=payload, headers=analyst_headers)
             resp_admin = client.post("/api/v1/sources", json=payload, headers=admin_headers)

@@ -6,6 +6,7 @@ import type {
   Rule, RuleCreate, RuleUpdate,
   Source, SourceCreate, SourceUpdate,
   TokenResponse, User, UserCreate, UserUpdate,
+  SourceCredential, SourceCredentialRotation,
 } from '../types/api';
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -35,6 +36,12 @@ export const sources = {
 
   disable: (id: string) =>
     apiClient.delete(`/sources/${id}`),
+
+  credentials: (id: string) =>
+    apiClient.get<SourceCredential[]>(`/sources/${id}/credentials`).then((r) => r.data),
+
+  rotateCredential: (id: string) =>
+    apiClient.post<SourceCredentialRotation>(`/sources/${id}/credentials/rotate`).then((r) => r.data),
 };
 
 // ── Règles ───────────────────────────────────────────────────────────────────

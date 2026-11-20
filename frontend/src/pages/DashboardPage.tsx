@@ -7,11 +7,10 @@ import { alerts, coverage, incidents } from '../api/analyst';
 import type { CoverageState, Incident } from '../api/analyst';
 
 const SEVERITY_DOT: Record<string, string> = {
-  CRITIQUE: '#ef4444',
-  ELEVE:    '#f97316',
-  MOYEN:    '#eab308',
-  FAIBLE:   '#22c55e',
-  INFO:     '#3b82f6',
+  critique: '#ef4444',
+  elevee:   '#f97316',
+  moyenne:  '#eab308',
+  faible:   '#22c55e',
 };
 
 const COVERAGE_DOT: Record<string, string> = {
@@ -37,8 +36,8 @@ export function DashboardPage() {
   const { data: alertList = [] } = useQuery({ queryKey: ['alerts-recent'], queryFn: () => alerts.list({ limit: 20 }) });
   const { data: coverageList = [] } = useQuery({ queryKey: ['coverage'], queryFn: () => coverage.list() });
 
-  const openIncidents = incidentList.filter((i: Incident) => i.state === 'OUVERT' || i.state === 'EN_COURS');
-  const criticalIncidents = openIncidents.filter((i: Incident) => i.severity === 'CRITIQUE' || i.severity === 'ELEVE');
+  const openIncidents = incidentList.filter((i: Incident) => i.state === 'ouvert' || i.state === 'en_cours');
+  const criticalIncidents = openIncidents.filter((i: Incident) => i.severity === 'critique' || i.severity === 'elevee');
   const activeSources = (coverageList as CoverageState[]).filter((c) => c.state === 'ACTIVE').length;
   const silentSources = (coverageList as CoverageState[]).filter((c) => c.state === 'SILENCIEUSE' || c.state === 'FLUX_INCOMPLET').length;
 
