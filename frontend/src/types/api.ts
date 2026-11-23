@@ -4,15 +4,14 @@
 
 export type UserRole = 'ADMIN' | 'ANALYST';
 
-// Cycle de vie de l'incident (C4 incidents.incident_status) : 3 états.
-export type IncidentState = 'ouvert' | 'en_cours' | 'clos';
+export type IncidentState =
+  | 'OUVERT'
+  | 'EN_COURS'
+  | 'RESOLU'
+  | 'CLOS'
+  | 'FAUX_POSITIF';
 
-// État de triage d'une alerte (C4 incidents.alert_status).
-export type AlertStatus = 'nouvelle' | 'en_cours' | 'cloturee';
-
-// Sévérité d'alerte/règle (C4/C5 config.severity) : 4 niveaux. « info » n'existe
-// que pour la sévérité d'événement ECS, jamais produite par les règles (C15).
-export type Severity = 'faible' | 'moyenne' | 'elevee' | 'critique';
+export type Severity = 'INFO' | 'FAIBLE' | 'MOYEN' | 'ELEVE' | 'CRITIQUE';
 
 export type CoverageStateEnum =
   | 'INCONNUE'
@@ -23,26 +22,6 @@ export type CoverageStateEnum =
 
 // ── Sources ──────────────────────────────────────────────────────────────────
 
-export type SourceTransport = 'https' | 'syslog';
-export type SourceIngestionMode = 'direct' | 'rejeu';
-export type SourceCriticality = 'faible' | 'moyenne' | 'elevee' | 'critique';
-
-export interface SourceConfig {
-  transport: SourceTransport;
-  ingestion_mode: SourceIngestionMode;
-  host: string | null;
-  criticality: SourceCriticality | null;
-  expected_min_events_per_h: number | null;
-}
-
-export interface SourceConfigUpdate {
-  transport?: SourceTransport;
-  ingestion_mode?: SourceIngestionMode;
-  host?: string | null;
-  criticality?: SourceCriticality | null;
-  expected_min_events_per_h?: number | null;
-}
-
 export interface Source {
   id: string;
   name: string;
@@ -50,7 +29,7 @@ export interface Source {
   type: string;
   active: boolean;
   silence_threshold_s: number;
-  config: SourceConfig;
+  config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -61,7 +40,7 @@ export interface SourceCreate {
   type: string;
   active?: boolean;
   silence_threshold_s?: number;
-  config?: SourceConfig;
+  config?: Record<string, unknown>;
 }
 
 export interface SourceUpdate {
@@ -69,23 +48,7 @@ export interface SourceUpdate {
   type?: string;
   active?: boolean;
   silence_threshold_s?: number;
-  config?: SourceConfigUpdate;
-}
-
-export interface SourceCredential {
-  id: string;
-  credential_type: 'token' | 'client_cert';
-  cert_fingerprint: string | null;
-  created_at: string;
-  expires_at: string | null;
-  revoked_at: string | null;
-}
-
-export interface SourceCredentialRotation {
-  credential_id: string;
-  created_at: string;
-  token: string;
-  note: string;
+  config?: Record<string, unknown>;
 }
 
 // ── Règles ───────────────────────────────────────────────────────────────────
@@ -128,8 +91,7 @@ export interface RuleUpdate {
 
 export interface User {
   id: string;
-  username: string;
-  email: string | null;
+  email: string;
   role: UserRole;
   is_active: boolean;
   created_at: string;
@@ -139,7 +101,6 @@ export interface User {
 export interface UserCreate {
   email: string;
   password: string;
-  username?: string;
   role?: UserRole;
   is_active?: boolean;
 }
@@ -148,6 +109,47 @@ export interface UserUpdate {
   role?: UserRole;
   is_active?: boolean;
   password?: string;
+}
+
+// ── Alertes ──────────────────────────────────────────────────────────────────
+
+/** Aligné sur api/analyst.ts — champs réellement retournés par le backend */
+export interface Alert {
+  id: string;
+  incident_id: string | null;
+  rule_id: string | null;
+  source_id: string | null;
+  severity: Severity;
+  title: string;
+  detail: string | null;
+  fired_at: string;
+}
+
+// ── Incidents ─────────────────────────────────────────────────────────────────
+
+export interface Incident {
+  id: string;
+  title: string;
+  description: string | null;
+  severity: Severity;
+  state: IncidentState;
+  assigned_to: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Aligné sur api/analyst.ts — champs réellement retournés par le backend */
+export interface TimelineEntry {
+  id: string;
+  incident_id: string;
+  entry_type: string;
+  occurred_at: string;
+  detail: string | null;
+  source_id: string | null;
+  alert_id: string | null;
+  user_id: string | null;
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────

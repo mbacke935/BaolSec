@@ -84,12 +84,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     commandclient.configure(s.incidents_command_url, s.command_token, s.incidents_command_timeout_s)
 
     # OpenSearch
-    os_client = AsyncOpenSearch(
-        hosts=s.opensearch_url,
-        use_ssl=s.opensearch_url.startswith("https"),
-        verify_certs=False,
-        http_compress=True,
-    )
+    use_ssl = s.opensearch_url.startswith("https")
+    os_kwargs: dict = {
+        "hosts": s.opensearch_url,
+        "use_ssl": use_ssl,
+        "http_compress": True,
+    }
+    if use_ssl:
+        if not s.opensearch_ca_cert:
+            raise RuntimeError(
+                "OPENSEARCH_CA_CERT est obligatoire quand l'URL OpenSearch est HTTPS. "
+                "Montez le CA auto-signé et pointez la variable vers son chemin."
+            )
+        os_kwargs["verify_certs"] = True
+        os_kwargs["ca_certs"] = s.opensearch_ca_cert
+    else:
+        # HTTP local en développement uniquement.
+        os_kwargs["verify_certs"] = False
+    os_client = AsyncOpenSearch(**os_kwargs)
     search.set_opensearch_client(os_client)
 
     logging.getLogger("baolsec.api").info("API démarrée")
@@ -103,13 +115,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # ── Application ───────────────────────────────────────────────────────────────
 
 def create_app() -> FastAPI:
+    s = Settings()
+    # /docs et /redoc sont désactivés en production (DEBUG=false).
+    # En développement, positionner DEBUG=true dans le .env.
+    _docs_url = "/docs" if s.debug else None
+    _redoc_url = "/redoc" if s.debug else None
+
     app = FastAPI(
         title="BaolSec API",
         version="1.0.0",
         description="API REST du SIEM BaolSec",
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url=_docs_url,
+        redoc_url=_redoc_url,
     )
 
     # CORS (restreint en production via env var)

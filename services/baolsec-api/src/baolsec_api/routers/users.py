@@ -21,10 +21,11 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from ..auth import hash_password
-from ..dependencies import get_conn, get_current_user, require_role
+from ..dependencies import get_conn, get_current_user, paginate, require_role
 from ..models import (
     ROLE_DB_NAMES,
     ROLE_FROM_DB,
+    Page,
     TokenPayload,
     UserCreate,
     UserResponse,
@@ -57,7 +58,7 @@ def _to_user_response(row: dict) -> dict:
     return data
 
 
-@router.get("", response_model=list[UserResponse])
+@router.get("", response_model=Page[UserResponse])
 async def list_users(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_ADMIN,
@@ -65,13 +66,12 @@ async def list_users(
     offset: int = Query(0, ge=0),
     active_only: bool = False,
 ):
-    q = _SELECT
-    if active_only:
-        q += " WHERE u.is_active = TRUE"
-    q += " ORDER BY u.username LIMIT %s OFFSET %s"
-    async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(q, [limit, offset])
-        return [_to_user_response(r) for r in await cur.fetchall()]
+    where = " WHERE u.is_active = TRUE" if active_only else ""
+    select_sql = _SELECT + where + " ORDER BY u.username"
+    count_sql = f"SELECT COUNT(*) AS count FROM acces.users u{where}"
+    page = await paginate(conn, select_sql, count_sql, [], limit, offset)
+    page["items"] = [_to_user_response(r) for r in page["items"]]
+    return page
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

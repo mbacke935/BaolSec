@@ -86,7 +86,7 @@ export function AppShell() {
             </button>
           ))}
           <div className="user">
-            <div className="uname">{user.email ?? user.username}</div>
+            <div className="uname">{user.email}</div>
             <div className="urole">{isAdmin ? 'Administrateur' : 'Analyste'}</div>
             <div className="ulinks">
               <button onClick={() => navigate('/')}>← Site</button>

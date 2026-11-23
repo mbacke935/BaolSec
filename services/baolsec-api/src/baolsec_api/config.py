@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     opensearch_url: str = "http://localhost:9200"
     opensearch_user: str = ""
     opensearch_password: str = ""
+    # Chemin vers le CA auto-signé d'OpenSearch (obligatoire quand l'URL est HTTPS).
+    # Monter le fichier généré par opensearch dans le container et pointer ici.
+    # Exemple : /certs/root-ca.pem
+    opensearch_ca_cert: str = ""
 
     # Auth JWT — jetons de courte durée avec renouvellement (C3/C5)
     jwt_secret: str
@@ -33,3 +37,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
     metrics_host: str = "0.0.0.0"
     metrics_port: int = 9107
+
+    # Mode debug — désactiver impérativement en production.
+    # Contrôle l'exposition de /docs, /redoc et /openapi.json.
+    debug: bool = False

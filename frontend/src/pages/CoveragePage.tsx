@@ -1,75 +1,152 @@
-/**
- * Page état de couverture (C23).
- */
+import type { CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { coverage as coverageApi, type CoverageState } from '../api/analyst';
+import { coverage as coverageApi, toList, type CoverageState } from '../api/analyst';
+import '../styles/design-system.css';
 
-const STATE_STYLE: Record<string, { bg: string; text: string; label: string }> = {
-  ACTIVE:         { bg: '#052e16', text: '#6ee7b7', label: 'Active' },
-  SILENCIEUSE:    { bg: '#422006', text: '#fde68a', label: 'Silencieuse' },
-  FLUX_INCOMPLET: { bg: '#431407', text: '#fdba74', label: 'Flux incomplet' },
-  DESACTIVEE:     { bg: '#1e293b', text: '#64748b', label: 'Désactivée' },
-  INCONNUE:       { bg: '#1e293b', text: '#64748b', label: 'Inconnue' },
-};
-
-function Bar({ ratio }: { ratio: number }) {
-  const pct = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
+function NormBar({ ratio }: { ratio: number }) {
+  const pct   = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
+  const color = pct > 90 ? 'var(--success)' : pct > 60 ? 'var(--warn)' : 'var(--danger)';
   return (
-    <div style={{ background: '#0f172a', borderRadius: '99px', height: '6px', overflow: 'hidden', minWidth: '80px' }}>
-      <div style={{ width: `${pct}%`, height: '100%', background: pct > 90 ? '#22c55e' : pct > 60 ? '#eab308' : '#ef4444', transition: 'width 0.3s' }} />
+    <div>
+      <div className="bs-flex-between bs-mb-4">
+        <span className="bs-text-xs bs-text-muted">Taux de normalisation</span>
+        <span className="bs-text-xs" style={{ color, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{pct}%</span>
+      </div>
+      <div className="bs-progress-bar">
+        <div className="bs-progress-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
     </div>
   );
 }
 
+function stateClass(s: string) {
+  if (s === 'ACTIVE')        return 'active';
+  if (s === 'SILENCIEUSE')   return 'silencieuse';
+  if (s === 'FLUX_INCOMPLET')return 'flux_incomplet';
+  return 'neutral';
+}
+
+function stateLabel(s: string) {
+  const labels: Record<string, string> = {
+    ACTIVE:        'Active',
+    SILENCIEUSE:   'Silencieuse',
+    FLUX_INCOMPLET:'Flux incomplet',
+    DESACTIVEE:    'Désactivée',
+    INCONNUE:      'Inconnue',
+  };
+  return labels[s] ?? s;
+}
+
 export function CoveragePage() {
-  const { data: list = [], isLoading } = useQuery({
+  const { data: listRaw, isLoading } = useQuery({
     queryKey: ['coverage'],
     queryFn: () => coverageApi.list(),
-    refetchInterval: 30_000,  // actualisation toutes les 30s
+    refetchInterval: 30_000,
   });
 
-  const active = list.filter((c: CoverageState) => c.state === 'ACTIVE').length;
-  const degraded = list.filter((c: CoverageState) => ['SILENCIEUSE', 'FLUX_INCOMPLET'].includes(c.state)).length;
+  const list = toList<CoverageState>(listRaw);
+
+  const active      = list.filter((c) => c.state === 'ACTIVE').length;
+  const degraded    = list.filter((c) => ['SILENCIEUSE', 'FLUX_INCOMPLET'].includes(c.state)).length;
+  const totalEvents = list.reduce((acc, c) => acc + (c.received_count ?? 0), 0);
 
   return (
-    <div>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Couverture sources</h1>
-      <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
-        {active} active(s) · {degraded} dégradée(s) · actualisé toutes les 30 s
-      </p>
+    <>
+      <div className="bs-page-header">
+        <div>
+          <h1 className="bs-page-title">Couverture <span>sources</span></h1>
+          <p className="bs-page-sub">Actualisation automatique toutes les 30 secondes</p>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="bs-kpi-grid">
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--success)' } as CSSProperties}>
+          <div className="bs-kpi-label">Sources actives</div>
+          <div className="bs-kpi-value bs-glow-accent">{isLoading ? '…' : active}</div>
+          <div className="bs-kpi-sub">Flux en réception nominale</div>
+        </div>
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--warn)' } as CSSProperties}>
+          <div className="bs-kpi-label">Sources dégradées</div>
+          <div className={`bs-kpi-value ${degraded > 0 ? 'bs-glow-warn' : ''}`}>
+            {isLoading ? '…' : degraded}
+          </div>
+          <div className="bs-kpi-sub">Silencieuses ou flux incomplets</div>
+        </div>
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent2)' } as CSSProperties}>
+          <div className="bs-kpi-label">Total sources</div>
+          <div className="bs-kpi-value">{isLoading ? '…' : list.length}</div>
+          <div className="bs-kpi-sub">Sources configurées</div>
+        </div>
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent)' } as CSSProperties}>
+          <div className="bs-kpi-label">Événements reçus</div>
+          <div className="bs-kpi-value" style={{ fontSize: 28 }}>
+            {isLoading ? '…' : totalEvents.toLocaleString('fr-FR')}
+          </div>
+          <div className="bs-kpi-sub">Cumul toutes sources</div>
+        </div>
+      </div>
 
       {isLoading ? (
-        <p style={{ color: '#64748b' }}>Chargement…</p>
+        <div className="bs-loading"><div className="bs-spinner" /> Chargement de la couverture…</div>
+      ) : list.length === 0 ? (
+        <div className="bs-card">
+          <div className="bs-empty">
+            <div className="bs-empty-icon">◎</div>
+            <div className="bs-empty-text">Aucune source configurée</div>
+            <div className="bs-empty-sub">Ajoutez des sources depuis l'administration</div>
+          </div>
+        </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' }}>
-          {list.map((c: CoverageState) => {
-            const ss = STATE_STYLE[c.state] || STATE_STYLE.INCONNUE;
+        <div className="bs-source-grid">
+          {list.map((c) => {
             const normRatio = c.received_count > 0 ? c.normalized_count / c.received_count : 0;
             return (
-              <div key={c.source_id} style={{ background: '#1e293b', borderRadius: '0.5rem', padding: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <span style={{ fontWeight: 600 }}>{c.source_name}</span>
-                  <span style={{ padding: '0.2rem 0.5rem', borderRadius: '0.25rem', fontSize: '0.7rem', background: ss.bg, color: ss.text }}>
-                    {ss.label}
+              <div key={c.source_id} className="bs-card bs-card-hover">
+                <div className="bs-flex-between bs-mb-16">
+                  <span style={{ fontWeight: 600, color: 'var(--fg)', fontSize: 14 }}>
+                    {c.source_name}
                   </span>
+                  <span className={`bs-badge ${stateClass(c.state)}`}>{stateLabel(c.state)}</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#94a3b8' }}>
-                    <span>Normalisation</span>
-                    <span>{c.normalized_count} / {c.received_count}</span>
+
+                <NormBar ratio={normRatio} />
+
+                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <div className="bs-detail-row">
+                    <span className="bs-detail-key">Événements reçus</span>
+                    <span className="bs-mono" style={{ fontSize: 12 }}>
+                      {c.received_count.toLocaleString('fr-FR')}
+                    </span>
                   </div>
-                  <Bar ratio={normRatio} />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#64748b' }}>
-                    <span>Dernière réception</span>
-                    <span>{c.last_received_at ? new Date(c.last_received_at).toLocaleString('fr-FR') : '—'}</span>
+                  <div className="bs-detail-row">
+                    <span className="bs-detail-key">Normalisés</span>
+                    <span className="bs-mono" style={{ fontSize: 12 }}>
+                      {c.normalized_count.toLocaleString('fr-FR')}
+                    </span>
                   </div>
+                  <div className="bs-detail-row">
+                    <span className="bs-detail-key">Dernière réception</span>
+                    <span className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)' }}>
+                      {c.last_received_at
+                        ? new Date(c.last_received_at).toLocaleString('fr-FR')
+                        : '—'}
+                    </span>
+                  </div>
+                  {c.last_processed_at && (
+                    <div className="bs-detail-row">
+                      <span className="bs-detail-key">Dernier traitement</span>
+                      <span className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)' }}>
+                        {new Date(c.last_processed_at).toLocaleString('fr-FR')}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
-          {list.length === 0 && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Aucune source</p>}
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -52,3 +52,25 @@ def require_role(*roles: UserRole):
         return current
 
     return _check
+
+
+async def paginate(
+    conn,
+    select_sql: str,
+    count_sql: str,
+    args: list,
+    limit: int,
+    offset: int,
+) -> dict:
+    """Exécute une requête paginée et retourne {items, total, limit, offset}."""
+    async with conn.cursor() as cur:
+        await cur.execute(count_sql, args)
+        row = await cur.fetchone()
+        total = row[0] if row else 0
+
+        await cur.execute(f"{select_sql} LIMIT %s OFFSET %s", args + [limit, offset])
+        rows = await cur.fetchall()
+        cols = [d.name for d in cur.description]
+        items = [dict(zip(cols, r)) for r in rows]
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}

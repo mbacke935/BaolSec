@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from psycopg import AsyncConnection
 
@@ -16,6 +16,7 @@ from ..auth import (
     create_refresh_token,
     create_token,
     decode_refresh_token,
+    revoke_token_str,
     verify_password,
 )
 from ..dependencies import get_conn
@@ -76,9 +77,25 @@ async def refresh(body: RefreshRequest):
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout():
-    """Fermeture de session (C5). Le jeton étant conservé en mémoire côté client
-    (C3), la déconnexion effective consiste à l'oublier ; la révocation serveur de
-    la session (acces.user_sessions) relève du modèle C4 et sera câblée avec la
-    création de session au login."""
+async def logout(
+    request: Request,
+    body: RefreshRequest | None = None,
+):
+    """Révocation serveur des jetons en cours (C5).
+
+    - Extrait le jeton d'accès depuis l'en-tête Authorization: Bearer …
+    - Extrait le jeton de renouvellement depuis le corps (optionnel)
+    - Inscrit chaque jti valide dans la blocklist en mémoire
+
+    Le client doit en parallèle effacer ses propres jetons (C3).
+    """
+    # Révocation du jeton d'accès (Bearer depuis l'en-tête Authorization)
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        revoke_token_str(auth_header[len("Bearer "):], "access")
+
+    # Révocation du jeton de renouvellement (corps optionnel)
+    if body and body.refresh_token:
+        revoke_token_str(body.refresh_token, "refresh")
+
     return None

@@ -1,57 +1,74 @@
-/**
- * Liste des incidents avec filtres (C23) — design aligné sur la maquette BaolSec.
- */
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { incidents as incidentsApi } from '../api/analyst';
+import { incidents as incidentsApi, toList } from '../api/analyst';
 import type { Incident, IncidentState } from '../api/analyst';
+import '../styles/design-system.css';
 
-const SEV_STYLE: Record<string, { bg: string; color: string }> = {
-  CRITIQUE: { bg: '#5b202a', color: '#ff9ba4' },
-  ELEVE:    { bg: '#59451e', color: '#f4cd7a' },
-  MOYEN:    { bg: '#3a3010', color: '#f4cd7a' },
-  FAIBLE:   { bg: '#123d35', color: '#6fe0b4' },
-  INFO:     { bg: '#0c2340', color: '#7bbef0' },
-};
-
-const STATE_OPTIONS: Array<{ value: string; label: string }> = [
+const STATE_OPTIONS = [
   { value: '', label: 'Tous' },
-  { value: 'OUVERT', label: 'Ouverts' },
-  { value: 'EN_COURS', label: 'En cours' },
-  { value: 'RESOLU', label: 'Résolus' },
-  { value: 'CLOS', label: 'Clos' },
+  { value: 'OUVERT',       label: 'Ouverts' },
+  { value: 'EN_COURS',     label: 'En cours' },
+  { value: 'RESOLU',       label: 'Résolus' },
+  { value: 'CLOS',         label: 'Clos' },
   { value: 'FAUX_POSITIF', label: 'Faux positif' },
 ];
 
-export function IncidentsListPage() {
-  const [stateFilter, setStateFilter] = useState('');
+function relTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const h = Math.floor(diff / 3600000);
+  if (h < 1) return '< 1 h';
+  if (h < 24) return `${h} h`;
+  return `${Math.floor(h / 24)} j`;
+}
 
-  const { data = [], isLoading } = useQuery({
+export function IncidentsListPage() {
+  const navigate = useNavigate();
+  const [stateFilter, setStateFilter] = useState('');
+  const [search, setSearch] = useState('');
+
+  const { data: raw, isLoading } = useQuery({
     queryKey: ['incidents', stateFilter],
-    queryFn: () => incidentsApi.list(stateFilter ? { state: stateFilter as IncidentState, limit: 100 } : { limit: 100 }),
+    queryFn: () =>
+      incidentsApi.list(
+        stateFilter ? { state: stateFilter as IncidentState, limit: 200 } : { limit: 200 },
+      ),
   });
 
+  const data     = toList<Incident>(raw);
+  const filtered = data.filter(
+    (i) => !search || i.title.toLowerCase().includes(search.toLowerCase()),
+  );
+
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+    <>
+      <div className="bs-page-header">
         <div>
-          <h2 style={{ fontSize: '1.5rem', margin: 0 }}>Incidents</h2>
-          <p style={{ color: 'var(--muted)', margin: '4px 0 0', fontSize: '0.8rem' }}>{data.length} résultat(s)</p>
+          <h1 className="bs-page-title"><span>Incidents</span></h1>
+          <p className="bs-page-sub">
+            {isLoading ? 'Chargement…' : `${filtered.length} incident(s) trouvé(s)`}
+          </p>
         </div>
-        {/* Filtre état */}
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+      </div>
+
+      {/* Barre de filtres */}
+      <div className="bs-filter-bar">
+        <div className="bs-input-wrap" style={{ flex: 1, minWidth: 220 }}>
+          <span className="bs-input-icon">⌕</span>
+          <input
+            className="bs-input"
+            type="search"
+            placeholder="Rechercher un incident…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="bs-pill-group">
           {STATE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               onClick={() => setStateFilter(opt.value)}
-              style={{
-                padding: '0.3rem 0.75rem', borderRadius: '20px', border: '1px solid',
-                borderColor: stateFilter === opt.value ? 'var(--green2)' : 'var(--line)',
-                background: stateFilter === opt.value ? '#16a36b20' : 'transparent',
-                color: stateFilter === opt.value ? 'var(--green2)' : 'var(--muted)',
-                fontSize: '0.78rem', cursor: 'pointer',
-              }}
+              className={`bs-pill${stateFilter === opt.value ? ' active' : ''}`}
             >
               {opt.label}
             </button>
@@ -60,48 +77,76 @@ export function IncidentsListPage() {
       </div>
 
       {isLoading ? (
-        <p style={{ color: 'var(--muted)' }}>Chargement…</p>
+        <div className="bs-loading"><div className="bs-spinner" /> Chargement des incidents…</div>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-          <thead>
-            <tr>
-              {['Titre', 'Sévérité', 'État', 'Ouvert le', ''].map((h) => (
-                <th key={h} style={{ textAlign: 'left', padding: '0.75rem 0.5rem', color: '#7f96ab', fontWeight: 600, borderBottom: '1px solid var(--line)' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((inc: Incident) => {
-              const sev = SEV_STYLE[inc.severity] || SEV_STYLE.INFO;
-              return (
-                <tr key={inc.id} style={{ borderBottom: '1px solid #1a3044' }}>
-                  <td style={{ padding: '0.85rem 0.5rem', color: '#cbd7e2' }}>{inc.title}</td>
-                  <td style={{ padding: '0.85rem 0.5rem' }}>
-                    <span style={{ padding: '3px 8px', borderRadius: '20px', fontSize: '0.7rem', background: sev.bg, color: sev.color }}>
-                      {inc.severity}
-                    </span>
-                  </td>
-                  <td style={{ padding: '0.85rem 0.5rem', color: 'var(--muted)' }}>{inc.state}</td>
-                  <td style={{ padding: '0.85rem 0.5rem', color: 'var(--muted)' }}>
-                    {new Date(inc.opened_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
-                  </td>
-                  <td style={{ padding: '0.85rem 0.5rem' }}>
-                    <Link
-                      to={`/incidents/${inc.id}`}
-                      style={{ color: 'var(--green2)', textDecoration: 'none', fontSize: '0.78rem' }}
-                    >
-                      Voir →
-                    </Link>
-                  </td>
+        <div className="bs-card" style={{ padding: 0 }}>
+          <div className="bs-table-wrap" style={{ border: 'none', borderRadius: 'var(--radius)' }}>
+            <table className="bs-table">
+              <thead>
+                <tr>
+                  <th>Sévérité</th>
+                  <th>Titre de l'incident</th>
+                  <th>État</th>
+                  <th>Responsable</th>
+                  <th>Ouvert</th>
+                  <th></th>
                 </tr>
-              );
-            })}
-            {data.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: '1.5rem 0.5rem', color: 'var(--muted)' }}>Aucun incident</td></tr>
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {filtered.map((inc) => (
+                  <tr
+                    key={inc.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/incidents/${inc.id}`)}
+                  >
+                    <td>
+                      <span className={`bs-badge ${inc.severity.toLowerCase()}`}>
+                        {inc.severity}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--fg)', fontWeight: 500, maxWidth: 320 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                        {inc.title}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`bs-badge ${inc.state.toLowerCase()}`}>
+                        {inc.state.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--fg3)', fontSize: 12 }}>
+                      {inc.assigned_to ?? <span className="bs-text-muted">—</span>}
+                    </td>
+                    <td className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)' }}>
+                      {relTime(inc.opened_at)}
+                    </td>
+                    <td>
+                      <Link
+                        to={`/incidents/${inc.id}`}
+                        className="bs-btn bs-btn-secondary bs-btn-xs"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Détails →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>
+                      <div className="bs-empty">
+                        <div className="bs-empty-icon">⚡</div>
+                        <div className="bs-empty-text">Aucun incident trouvé</div>
+                        <div className="bs-empty-sub">Modifiez vos critères de recherche</div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }

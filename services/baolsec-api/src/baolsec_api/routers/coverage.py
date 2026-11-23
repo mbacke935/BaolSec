@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from ..dependencies import get_conn, require_role
-from ..models import CoverageStateResponse, UserRole
+from ..dependencies import get_conn, paginate, require_role
+from ..models import CoverageStateResponse, Page, UserRole
 
 router = APIRouter(prefix="/coverage", tags=["coverage"])
 
@@ -33,16 +33,17 @@ SELECT cs.source_id, s.name AS source_name, cs.state,
 """
 
 
-@router.get("", response_model=list[CoverageStateResponse])
+@router.get("", response_model=Page[CoverageStateResponse])
 async def list_coverage(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_READ,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(_SELECT + " ORDER BY s.name LIMIT %s OFFSET %s", (limit, offset))
-        return await cur.fetchall()
+    select_sql = _SELECT.strip() + " ORDER BY s.name"
+    count_sql = ("SELECT COUNT(*) AS count FROM couverture.coverage_state cs"
+                 " JOIN config.sources s ON s.id = cs.source_id")
+    return await paginate(conn, select_sql, count_sql, [], limit, offset)
 
 
 @router.get("/history")

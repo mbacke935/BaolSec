@@ -1,102 +1,198 @@
-/**
- * Page de recherche full-text sur événements/alertes/incidents (C23).
- */
 import { useState } from 'react';
-import { search as searchApi } from '../api/analyst';
+import { useQuery } from '@tanstack/react-query';
+import { search } from '../api/analyst';
+import '../styles/design-system.css';
 
-type SearchIndex = 'events' | 'alerts' | 'incidents';
+/** Lit un champ ECS qu'il soit imbriqué (source.name) ou aplati. */
+function pick(doc: Record<string, unknown>, path: string): string | undefined {
+  if (doc[path] != null) return String(doc[path]);
+  let cur: unknown = doc;
+  for (const part of path.split('.')) {
+    if (cur && typeof cur === 'object' && part in (cur as object))
+      cur = (cur as Record<string, unknown>)[part];
+    else return undefined;
+  }
+  return cur == null ? undefined : String(cur);
+}
+
+function highlightMatch(text: string, term: string) {
+  if (!term) return <>{text}</>;
+  const idx = text.toLowerCase().indexOf(term.toLowerCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark style={{ background: 'rgba(0,212,170,0.25)', color: 'var(--accent)', borderRadius: 2 }}>
+        {text.slice(idx, idx + term.length)}
+      </mark>
+      {text.slice(idx + term.length)}
+    </>
+  );
+}
 
 export function SearchPage() {
-  const [query, setQuery] = useState('');
-  const [index, setIndex] = useState<SearchIndex>('events');
-  const [results, setResults] = useState<{ total: number; hits: Array<Record<string, unknown>> } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [query, setQuery]         = useState('');
+  const [submitted, setSubmitted] = useState('');
+  const [mode, setMode]           = useState<'events' | 'alerts' | 'incidents'>('events');
+  const limit = 50;
 
-  const handleSearch = async (e: React.FormEvent) => {
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['search', mode, submitted],
+    queryFn: () => search[mode](submitted, limit),
+    enabled: submitted.trim().length >= 2,
+  });
+
+  // data est un SearchResult { total, hits[] }, pas un tableau
+  const hits  = data?.hits ?? [];
+  const total = data?.total ?? 0;
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!query.trim()) return;
-    setLoading(true);
-    setError('');
-    setResults(null);
-    try {
-      const res = await searchApi[index](query.trim());
-      setResults(res);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Erreur de recherche');
-    } finally {
-      setLoading(false);
-    }
-  };
+    if (query.trim().length < 2) return;
+    setSubmitted(query.trim());
+  }
 
   return (
-    <div>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '1.5rem' }}>Recherche</h1>
-
-      <form onSubmit={handleSearch} style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-        {/* Sélecteur d'index */}
-        <div style={{ display: 'flex', borderRadius: '0.375rem', overflow: 'hidden', border: '1px solid #334155' }}>
-          {(['events', 'alerts', 'incidents'] as SearchIndex[]).map((idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => setIndex(idx)}
-              style={{
-                padding: '0.4rem 0.75rem', background: index === idx ? '#0ea5e9' : '#1e293b',
-                color: index === idx ? '#fff' : '#94a3b8', border: 'none', cursor: 'pointer',
-                fontSize: '0.85rem', textTransform: 'capitalize',
-              }}
-            >
-              {idx === 'events' ? 'Événements' : idx === 'alerts' ? 'Alertes' : 'Incidents'}
-            </button>
-          ))}
-        </div>
-
-        {/* Champ de recherche */}
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder='Requête Lucene (ex: severity:ELEVE AND source:"firewall")'
-          style={{
-            flex: 1, minWidth: '300px', padding: '0.4rem 0.75rem', borderRadius: '0.375rem',
-            border: '1px solid #334155', background: '#0f172a', color: '#e2e8f0', fontSize: '0.9rem',
-          }}
-        />
-        <button
-          type="submit"
-          disabled={loading || !query.trim()}
-          style={{ padding: '0.4rem 1.25rem', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '0.375rem', cursor: 'pointer' }}
-        >
-          {loading ? '…' : 'Rechercher'}
-        </button>
-      </form>
-
-      {error && <p style={{ color: '#f87171', marginBottom: '1rem' }}>{error}</p>}
-
-      {results && (
+    <>
+      <div className="bs-page-header">
         <div>
-          <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '1rem' }}>
-            {results.total} résultat(s)
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {results.hits.map((hit, idx) => (
-              <div key={idx} style={{ background: '#1e293b', borderRadius: '0.375rem', padding: '0.75rem 1rem' }}>
-                <pre style={{
-                  margin: 0, fontSize: '0.78rem', color: '#94a3b8',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                  fontFamily: 'ui-monospace, monospace',
-                }}>
-                  {JSON.stringify(hit, null, 2)}
-                </pre>
-              </div>
-            ))}
-            {results.hits.length === 0 && (
-              <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Aucun résultat</p>
+          <h1 className="bs-page-title">Recherche <span>SIEM</span></h1>
+          <p className="bs-page-sub">Interrogez les événements, alertes et incidents indexés</p>
+        </div>
+      </div>
+
+      {/* Formulaire de recherche */}
+      <div className="bs-card bs-mb-16">
+        <form onSubmit={handleSubmit}>
+          <div className="bs-input-wrap" style={{ maxWidth: 640 }}>
+            <span className="bs-input-icon">⌕</span>
+            <input
+              className="bs-input"
+              type="search"
+              placeholder="Rechercher… (min. 2 caractères)"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Sélection du mode */}
+            <div className="bs-pill-group" style={{ marginRight: 8 }}>
+              {(['events', 'alerts', 'incidents'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`bs-pill${mode === m ? ' active' : ''}`}
+                  onClick={() => setMode(m)}
+                >
+                  {m === 'events' ? 'Événements' : m === 'alerts' ? 'Alertes' : 'Incidents'}
+                </button>
+              ))}
+            </div>
+            <button
+              type="submit"
+              className="bs-btn bs-btn-primary bs-btn-sm"
+              disabled={query.trim().length < 2 || isLoading}
+            >
+              {isLoading ? 'Recherche…' : 'Rechercher'}
+            </button>
+            {submitted && (
+              <button
+                type="button"
+                className="bs-btn bs-btn-ghost bs-btn-sm"
+                onClick={() => { setQuery(''); setSubmitted(''); }}
+              >
+                Réinitialiser
+              </button>
             )}
+            {isFetching && !isLoading && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg4)' }}>
+                <span className="bs-spinner" style={{ width: 12, height: 12 }} /> Actualisation…
+              </span>
+            )}
+          </div>
+        </form>
+      </div>
+
+      {/* État vide initial */}
+      {!submitted && (
+        <div className="bs-card">
+          <div className="bs-empty">
+            <div className="bs-empty-icon" style={{ fontSize: 32 }}>⌕</div>
+            <div className="bs-empty-text">Lancez une recherche</div>
+            <div className="bs-empty-sub">
+              Saisissez un terme (min. 2 car.) puis sélectionnez le type de données à interroger
+            </div>
           </div>
         </div>
       )}
-    </div>
+
+      {/* Résultats */}
+      {submitted && (
+        <>
+          {isLoading ? (
+            <div className="bs-loading"><div className="bs-spinner" /> Recherche en cours…</div>
+          ) : hits.length === 0 ? (
+            <div className="bs-card">
+              <div className="bs-empty">
+                <div className="bs-empty-icon">◉</div>
+                <div className="bs-empty-text">Aucun résultat</div>
+                <div className="bs-empty-sub">
+                  Aucune donnée ne correspond à « {submitted} »
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bs-card" style={{ padding: 0 }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13, color: 'var(--fg2)', fontWeight: 500 }}>
+                  {total.toLocaleString('fr-FR')} résultat(s) pour « {submitted} »
+                </span>
+                <span className="bs-mono" style={{ fontSize: 11, color: 'var(--fg4)' }}>
+                  {hits.length} affiché(s)
+                </span>
+              </div>
+
+              <div className="bs-table-wrap" style={{ border: 'none' }}>
+                <table className="bs-table">
+                  <thead>
+                    <tr>
+                      <th>Horodatage</th>
+                      <th>Source / ID</th>
+                      <th>Type / Catégorie</th>
+                      <th>Message / Résumé</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hits.map((h, i) => {
+                      const ts  = pick(h, '@timestamp') ?? pick(h, 'fired_at') ?? pick(h, 'opened_at') ?? pick(h, 'created_at');
+                      const src = pick(h, 'source_id') ?? pick(h, 'source.name') ?? pick(h, 'host.name') ?? '—';
+                      const typ = pick(h, 'event.action') ?? pick(h, 'event.category') ?? pick(h, 'severity') ?? pick(h, 'state') ?? '—';
+                      const msg = pick(h, 'message') ?? pick(h, 'title') ?? '—';
+                      return (
+                        <tr key={pick(h, '_id') ?? pick(h, 'id') ?? String(i)}>
+                          <td className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)', whiteSpace: 'nowrap' }}>
+                            {ts ? new Date(ts).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
+                          </td>
+                          <td>
+                            <span className="bs-code" style={{ fontSize: 11 }}>{src}</span>
+                          </td>
+                          <td style={{ color: 'var(--fg3)', fontSize: 12 }}>{typ}</td>
+                          <td style={{ maxWidth: 400 }}>
+                            <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--fg2)' }}>
+                              {highlightMatch(msg, submitted)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </>
   );
 }

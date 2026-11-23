@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Generic, TypeVar
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -85,6 +85,11 @@ class SourceConfig(BaseModel):
     host: str | None = None
     criticality: Literal["faible", "moyenne", "elevee", "critique"] | None = None
     expected_min_events_per_h: int | None = Field(None, ge=0)
+    hostname: str | None = None
+    ip_address: str | None = None
+    environment: Literal["production", "staging", "test", "developpement"] | None = None
+    tags: list[str] = Field(default_factory=list)
+    responsible: str | None = None
 
 
 class SourceConfigUpdate(BaseModel):
@@ -93,6 +98,11 @@ class SourceConfigUpdate(BaseModel):
     host: str | None = None
     criticality: Literal["faible", "moyenne", "elevee", "critique"] | None = None
     expected_min_events_per_h: int | None = Field(None, ge=0)
+    hostname: str | None = None
+    ip_address: str | None = None
+    environment: Literal["production", "staging", "test", "developpement"] | None = None
+    tags: list[str] | None = None
+    responsible: str | None = None
 
 
 class SourceCreate(BaseModel):
@@ -249,8 +259,10 @@ class UserResponse(BaseModel):
 
 # ── Pagination ────────────────────────────────────────────────────────────────
 
-class Page(BaseModel):
+T = TypeVar("T")
+
+class Page(BaseModel, Generic[T]):
     total: int
     limit: int
     offset: int
-    items: list[Any]
+    items: list[T]

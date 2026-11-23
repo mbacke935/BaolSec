@@ -70,7 +70,7 @@ services:
       retries: 5
 
   opensearch:
-    image: opensearchproject/opensearch:2.19.0
+    image: opensearchproject/opensearch:2.18.0
     <<: *restart-policy
     environment:
       discovery.type: single-node
@@ -87,7 +87,7 @@ services:
       retries: 10
 
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:2.19.0
+    image: opensearchproject/opensearch-dashboards:2.18.0
     <<: *restart-policy
     environment:
       OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
@@ -104,9 +104,10 @@ services:
   # ─────────────────────────────────────────────────────────────
 
   gateway:
+    profiles: ["todo"]   # services/ingestion-gateway/ existe ; renommer quand ce service sera aligné
     build:
-      context: ..
-      dockerfile: services/gateway/Dockerfile
+      context: .
+      dockerfile: services/ingestion-gateway/Dockerfile
     <<: *restart-policy
     env_file: .env
     environment:
@@ -124,9 +125,10 @@ services:
     logging: *fluent-logging
 
   normalizer:
+    profiles: ["todo"]   # services/normalization-worker/ existe ; renommer quand ce service sera aligné
     build:
-      context: ..
-      dockerfile: services/normalizer/Dockerfile
+      context: .
+      dockerfile: services/normalization-worker/Dockerfile
     <<: *restart-policy
     env_file: .env
     environment:
@@ -140,8 +142,9 @@ services:
     logging: *fluent-logging
 
   enricher:
+    profiles: ["todo"]   # service pas encore implémenté
     build:
-      context: ..
+      context: .
       dockerfile: services/enricher/Dockerfile
     <<: *restart-policy
     env_file: .env
@@ -160,9 +163,10 @@ services:
   # ─────────────────────────────────────────────────────────────
 
   rule-engine:
+    profiles: ["todo"]   # services/detection-worker/ existe ; renommer quand ce service sera aligné
     build:
-      context: ..
-      dockerfile: services/rule-engine/Dockerfile
+      context: .
+      dockerfile: services/detection-worker/Dockerfile
     <<: *restart-policy
     env_file: .env
     environment:
@@ -180,7 +184,7 @@ services:
 
   incident-builder:
     build:
-      context: ..
+      context: .
       dockerfile: services/incident-builder/Dockerfile
     <<: *restart-policy
     env_file: .env
@@ -223,7 +227,7 @@ services:
 
   indexing-worker:
     build:
-      context: ..
+      context: .
       dockerfile: services/indexing-worker/Dockerfile
     <<: *restart-policy
     env_file: .env
@@ -244,7 +248,7 @@ services:
 
   api:
     build:
-      context: ..
+      context: .
       dockerfile: services/baolsec-api/Dockerfile
     <<: *restart-policy
     env_file: .env
@@ -267,13 +271,11 @@ services:
 
   frontend:
     build:
-      context: ..
-      dockerfile: services/frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     <<: *restart-policy
-    environment:
-      VITE_API_URL: http://api:8000
     ports:
-      - "3000:3000"
+      - "5174:80"
     depends_on:
       - api
     networks: [baolsec-backend]
@@ -284,7 +286,7 @@ services:
   # ─────────────────────────────────────────────────────────────
 
   fluent-bit:
-    image: fluent/fluent-bit:3.3
+    image: fluent/fluent-bit:3.2
     <<: *restart-policy
     volumes:
       - ./docker/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
@@ -295,7 +297,7 @@ services:
     networks: [baolsec-obs, baolsec-data]
 
   prometheus:
-    image: prom/prometheus:v3.3.1
+    image: prom/prometheus:v3.2.1
     <<: *restart-policy
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -310,7 +312,7 @@ services:
     networks: [baolsec-obs, baolsec-backend, baolsec-data]
 
   grafana:
-    image: grafana/grafana:11.6.1
+    image: grafana/grafana:11.5.2
     <<: *restart-policy
     environment:
       GF_SECURITY_ADMIN_USER: admin

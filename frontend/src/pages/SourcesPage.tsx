@@ -1,792 +1,483 @@
-/**
- * Gestion des sources de données BaolSec.
- *
- * Le champ type correspond à config.sources.source_type :
- * linux | windows | firewall | http.
- * Il ne représente pas le transport d'ingestion (HTTPS ou Syslog).
- */
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { sources } from '../api/resources';
-import { coverage } from '../api/analyst';
-import { useAuth } from '../hooks/useAuth';
-import { useSearch } from '../components/AppShell';
-import { Modal } from '../components/Modal';
-import type {
-  SourceCreate,
-  SourceCredentialRotation,
-} from '../types/api';
+import { useState, useEffect, useCallback } from 'react';
+import { apiClient as api } from '../api/client';
 
-const SOURCE_TYPES = [
-  { value: 'linux', label: 'Linux' },
-  { value: 'windows', label: 'Windows' },
-  { value: 'firewall', label: 'Pare-feu' },
-  { value: 'http', label: 'Application / HTTP' },
-] as const;
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-const INITIAL_FORM: SourceCreate = {
-  name: '',
-  type: 'linux',
-  description: '',
-  active: true,
-  silence_threshold_s: 300,
-  config: {
-    transport: 'https',
-    ingestion_mode: 'direct',
-    host: '',
-    criticality: 'moyenne',
-    expected_min_events_per_h: null,
-  },
+type SourceType    = 'linux' | 'windows' | 'firewall' | 'http';
+type Transport     = 'https' | 'syslog';
+type IngestionMode = 'direct' | 'rejeu';
+type Criticality   = 'faible' | 'moyenne' | 'elevee' | 'critique';
+type Environment   = 'production' | 'staging' | 'test' | 'developpement';
+
+interface SourceConfig {
+  transport: Transport;
+  ingestion_mode: IngestionMode;
+  host: string | null;
+  criticality: Criticality | null;
+  expected_min_events_per_h: number | null;
+  hostname: string | null;
+  ip_address: string | null;
+  environment: Environment | null;
+  tags: string[];
+  responsible: string | null;
+}
+
+interface Source {
+  id: string;
+  name: string;
+  description: string | null;
+  type: SourceType;
+  active: boolean;
+  silence_threshold_s: number;
+  config: SourceConfig;
+  created_at: string;
+  updated_at: string;
+}
+
+function toList<T>(raw: unknown): T[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as T[];
+  const r = raw as Record<string, unknown>;
+  if (Array.isArray(r.items)) return r.items as T[];
+  return [];
+}
+
+// ─── Stepper Modal ───────────────────────────────────────────────────────────
+
+const STEPS = ['Identification', 'Collecte', 'Supervision', 'Confirmation'];
+
+interface FormState {
+  // Step 1
+  name: string;
+  type: SourceType;
+  hostname: string;
+  ip_address: string;
+  environment: Environment | '';
+  criticality: Criticality | '';
+  description: string;
+  // Step 2
+  transport: Transport;
+  ingestion_mode: IngestionMode;
+  host: string;
+  expected_min_events_per_h: string;
+  // Step 3
+  silence_threshold_s: string;
+  tags: string;
+  responsible: string;
+  active: boolean;
+}
+
+const INITIAL: FormState = {
+  name: '', type: 'linux', hostname: '', ip_address: '',
+  environment: '', criticality: '', description: '',
+  transport: 'https', ingestion_mode: 'direct', host: '',
+  expected_min_events_per_h: '',
+  silence_threshold_s: '600', tags: '', responsible: '', active: true,
 };
 
-function etat(state: string | undefined): { cls: string; label: string } {
-  switch (state) {
-    case 'ACTIVE':
-      return { cls: 'up', label: '● Active' };
-    case 'SILENCIEUSE':
-      return { cls: 'down', label: '● Silencieuse' };
-    case 'FLUX_INCOMPLET':
-      return { cls: 'down', label: '● Flux incomplet' };
-    case 'DESACTIVEE':
-      return { cls: 'down', label: '● Désactivée' };
-    default:
-      return { cls: 'down', label: '● Inconnue' };
-  }
-}
+function SourceModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [step, setStep]     = useState(0);
+  const [form, setForm]     = useState<FormState>(INITIAL);
+  const [error, setError]   = useState('');
+  const [saving, setSaving] = useState(false);
 
-function typeLabel(type: string): string {
-  return SOURCE_TYPES.find((item) => item.value === type)?.label ?? type;
-}
+  const set = (k: keyof FormState, v: string | boolean) =>
+    setForm(f => ({ ...f, [k]: v }));
 
-function erreurMessage(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return 'Une erreur inattendue est survenue.';
-}
-
-function dateLabel(value: string | null): string {
-  if (!value) return 'Non définie';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? 'Date invalide'
-    : date.toLocaleString('fr-FR');
-}
-
-export function SourcesPage() {
-  const search = useSearch().toLowerCase();
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'ADMIN';
-  const qc = useQueryClient();
-
-  const srcQ = useQuery({
-    queryKey: ['sources'],
-    queryFn: () => sources.list({ limit: 200 }),
-  });
-
-  const covQ = useQuery({
-    queryKey: ['coverage'],
-    queryFn: () => coverage.list(),
-  });
-
-  const covById = new Map(
-    (covQ.data ?? []).map((item) => [item.source_id, item.state]),
-  );
-
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<SourceCreate>({ ...INITIAL_FORM });
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
-  const [generatedCredential, setGeneratedCredential] =
-    useState<SourceCredentialRotation | null>(null);
-  const [copyMessage, setCopyMessage] = useState('');
-
-  const credentialsQ = useQuery({
-    queryKey: ['source-credentials', selectedSourceId],
-    queryFn: () => sources.credentials(selectedSourceId!),
-    enabled: isAdmin && selectedSourceId !== null,
-  });
-
-  const createMut = useMutation({
-    mutationFn: (body: SourceCreate) => sources.create(body),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['sources'] });
-      await qc.invalidateQueries({ queryKey: ['coverage'] });
-      setOpen(false);
-      setForm({ ...INITIAL_FORM });
-    },
-  });
-
-  const disableMut = useMutation({
-    mutationFn: (id: string) => sources.disable(id),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['sources'] });
-      await qc.invalidateQueries({ queryKey: ['coverage'] });
-    },
-  });
-
-  const rotateMut = useMutation({
-    mutationFn: (id: string) => sources.rotateCredential(id),
-    onSuccess: async (result) => {
-      setGeneratedCredential(result);
-      setCopyMessage('');
-      await qc.invalidateQueries({
-        queryKey: ['source-credentials', selectedSourceId],
-      });
-    },
-  });
-
-  const rows = (srcQ.data ?? []).filter((source) =>
-    !search ||
-    `${source.name} ${source.type} ${source.description ?? ''}`
-      .toLowerCase()
-      .includes(search),
-  );
-
-  const selectedSource = rows.find(
-    (source) => source.id === selectedSourceId,
-  );
-
-  function openCreateModal() {
-    createMut.reset();
-    setForm({ ...INITIAL_FORM });
-    setOpen(true);
+  // ── Validation par étape ──
+  function validateStep(s: number): string {
+    if (s === 0 && !form.name.trim()) return 'Le nom est obligatoire.';
+    return '';
   }
 
-  function closeCreateModal() {
-    if (createMut.isPending) return;
-    setOpen(false);
-    createMut.reset();
+  function next() {
+    const err = validateStep(step);
+    if (err) { setError(err); return; }
+    setError('');
+    setStep(s => Math.min(s + 1, 3));
   }
+  function prev() { setError(''); setStep(s => Math.max(s - 1, 0)); }
 
-  function selectSource(id: string) {
-    setGeneratedCredential(null);
-    setCopyMessage('');
-    setSelectedSourceId((current) => current === id ? null : id);
-  }
-
-  function closeCredentials() {
-    if (rotateMut.isPending) return;
-    setSelectedSourceId(null);
-    setGeneratedCredential(null);
-    setCopyMessage('');
-    rotateMut.reset();
-  }
-
-  function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const name = form.name.trim();
-    const description = form.description?.trim() || '';
-    const silenceThreshold = form.silence_threshold_s ?? 300;
-
-    if (!name) return;
-    if (!Number.isInteger(silenceThreshold) || silenceThreshold <= 0) {
-      return;
-    }
-
-    createMut.mutate({
-      ...form,
-      name,
-      description,
-      active: true,
-      silence_threshold_s: silenceThreshold,
-      config: form.config ?? INITIAL_FORM.config,
-    });
-  }
-
-  async function copyGeneratedToken() {
-    if (!generatedCredential?.token) return;
-
+  async function submit() {
+    setSaving(true);
+    setError('');
     try {
-      await navigator.clipboard.writeText(generatedCredential.token);
-      setCopyMessage('Token copié dans le presse-papiers.');
-    } catch {
-      setCopyMessage(
-        'Copie impossible. Sélectionne et copie le token manuellement.',
-      );
+      const tagList = form.tags.split(',').map(t => t.trim()).filter(Boolean);
+      const body = {
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        type: form.type,
+        active: form.active,
+        silence_threshold_s: parseInt(form.silence_threshold_s, 10),
+        config: {
+          transport: form.transport,
+          ingestion_mode: form.ingestion_mode,
+          host: form.host.trim() || null,
+          criticality: form.criticality || null,
+          expected_min_events_per_h: form.expected_min_events_per_h
+            ? parseInt(form.expected_min_events_per_h, 10) : null,
+          hostname:   form.hostname.trim() || null,
+          ip_address: form.ip_address.trim() || null,
+          environment: form.environment || null,
+          tags: tagList,
+          responsible: form.responsible.trim() || null,
+        },
+      };
+      await api.post('/sources', body);
+      onCreated();
+      onClose();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string };
+      setError(err?.response?.data?.detail ?? err?.message ?? 'Erreur inattendue');
+    } finally {
+      setSaving(false);
     }
   }
 
-  function rotateToken() {
-    if (!selectedSource) return;
+  // ── Rendu des étapes ──
+  function renderStep() {
+    switch (step) {
+      case 0: return (
+        <div className="bs-form-grid">
+          <label className="bs-label">Nom <span className="bs-required">*</span></label>
+          <input className="bs-input" placeholder="ex. firewall-paris-01"
+            value={form.name} onChange={e => set('name', e.target.value)} autoFocus />
 
-    const confirmed = confirm(
-      `Générer un nouveau token pour « ${selectedSource.name} » ?\n\n` +
-      'Cette opération révoquera les anciens tokens actifs de cette source. ' +
-      'Les collecteurs utilisant ces anciens tokens ne pourront plus s’authentifier.',
-    );
+          <label className="bs-label">Type de source</label>
+          <select className="bs-select" value={form.type}
+            onChange={e => set('type', e.target.value as SourceType)}>
+            <option value="linux">Linux</option>
+            <option value="windows">Windows</option>
+            <option value="firewall">Firewall</option>
+            <option value="http">HTTP</option>
+          </select>
 
-    if (confirmed) {
-      setGeneratedCredential(null);
-      setCopyMessage('');
-      rotateMut.mutate(selectedSource.id);
+          <label className="bs-label">Hostname</label>
+          <input className="bs-input" placeholder="ex. srv-prod-01.internal"
+            value={form.hostname} onChange={e => set('hostname', e.target.value)} />
+
+          <label className="bs-label">Adresse IP</label>
+          <input className="bs-input" placeholder="ex. 192.168.1.10"
+            value={form.ip_address} onChange={e => set('ip_address', e.target.value)} />
+
+          <label className="bs-label">Environnement</label>
+          <select className="bs-select" value={form.environment}
+            onChange={e => set('environment', e.target.value as Environment | '')}>
+            <option value="">— Non défini —</option>
+            <option value="production">Production</option>
+            <option value="staging">Staging</option>
+            <option value="test">Test</option>
+            <option value="developpement">Développement</option>
+          </select>
+
+          <label className="bs-label">Criticité</label>
+          <select className="bs-select" value={form.criticality}
+            onChange={e => set('criticality', e.target.value as Criticality | '')}>
+            <option value="">— Non définie —</option>
+            <option value="faible">Faible</option>
+            <option value="moyenne">Moyenne</option>
+            <option value="elevee">Élevée</option>
+            <option value="critique">Critique</option>
+          </select>
+
+          <label className="bs-label">Description</label>
+          <textarea className="bs-input" rows={3} placeholder="Description optionnelle…"
+            value={form.description} onChange={e => set('description', e.target.value)} />
+        </div>
+      );
+
+      case 1: return (
+        <div className="bs-form-grid">
+          <label className="bs-label">Transport</label>
+          <select className="bs-select" value={form.transport}
+            onChange={e => set('transport', e.target.value as Transport)}>
+            <option value="https">HTTPS</option>
+            <option value="syslog">Syslog</option>
+          </select>
+
+          <label className="bs-label">Mode d'ingestion</label>
+          <select className="bs-select" value={form.ingestion_mode}
+            onChange={e => set('ingestion_mode', e.target.value as IngestionMode)}>
+            <option value="direct">Direct</option>
+            <option value="rejeu">Rejeu</option>
+          </select>
+
+          <label className="bs-label">Host / gateway de collecte</label>
+          <input className="bs-input" placeholder="ex. collector.baolsec.local"
+            value={form.host} onChange={e => set('host', e.target.value)} />
+
+          <label className="bs-label">Événements minimum / heure</label>
+          <input className="bs-input" type="number" min="0"
+            placeholder="ex. 100 (laisser vide = pas de seuil)"
+            value={form.expected_min_events_per_h}
+            onChange={e => set('expected_min_events_per_h', e.target.value)} />
+        </div>
+      );
+
+      case 2: return (
+        <div className="bs-form-grid">
+          <label className="bs-label">Seuil de silence</label>
+          <select className="bs-select" value={form.silence_threshold_s}
+            onChange={e => set('silence_threshold_s', e.target.value)}>
+            <option value="300">5 minutes</option>
+            <option value="600">10 minutes</option>
+            <option value="900">15 minutes</option>
+            <option value="1800">30 minutes</option>
+            <option value="3600">1 heure</option>
+          </select>
+
+          <label className="bs-label">Tags <span className="bs-hint">(séparés par des virgules)</span></label>
+          <input className="bs-input" placeholder="ex. dmz, paris, critique"
+            value={form.tags} onChange={e => set('tags', e.target.value)} />
+
+          <label className="bs-label">Responsable</label>
+          <input className="bs-input" placeholder="ex. Jean Dupont ou equipe-soc"
+            value={form.responsible} onChange={e => set('responsible', e.target.value)} />
+
+          <label className="bs-label">Statut initial</label>
+          <div className="bs-toggle-row">
+            <label className="bs-toggle">
+              <input type="checkbox" checked={form.active}
+                onChange={e => set('active', e.target.checked)} />
+              <span className="bs-toggle-slider" />
+            </label>
+            <span>{form.active ? 'Active' : 'Désactivée'}</span>
+          </div>
+        </div>
+      );
+
+      case 3: {
+        const tagList = form.tags.split(',').map(t => t.trim()).filter(Boolean);
+        return (
+          <div className="bs-summary">
+            <Row label="Nom"          value={form.name} />
+            <Row label="Type"         value={form.type} />
+            {form.hostname   && <Row label="Hostname"      value={form.hostname} />}
+            {form.ip_address && <Row label="Adresse IP"    value={form.ip_address} />}
+            {form.environment && <Row label="Environnement" value={form.environment} />}
+            {form.criticality && <Row label="Criticité"    value={form.criticality} />}
+            <hr className="bs-divider" />
+            <Row label="Transport"      value={form.transport} />
+            <Row label="Ingestion"      value={form.ingestion_mode} />
+            {form.host && <Row label="Gateway" value={form.host} />}
+            <hr className="bs-divider" />
+            <Row label="Silence"
+              value={SILENCE_LABELS[form.silence_threshold_s] ?? form.silence_threshold_s + 's'} />
+            {tagList.length > 0 && (
+              <div className="bs-summary-row">
+                <span className="bs-summary-label">Tags</span>
+                <div className="bs-tag-list">
+                  {tagList.map(t => <span key={t} className="bs-badge">{t}</span>)}
+                </div>
+              </div>
+            )}
+            {form.responsible && <Row label="Responsable" value={form.responsible} />}
+            <Row label="Statut" value={form.active ? '✓ Active' : '✗ Désactivée'} />
+            {form.description && <Row label="Description" value={form.description} />}
+          </div>
+        );
+      }
     }
   }
 
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <h3>Sources de données</h3>
+    <div className="bs-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bs-modal">
+        {/* Header */}
+        <div className="bs-modal-header">
+          <h2 className="bs-modal-title">Nouvelle source</h2>
+          <button className="bs-btn-icon" onClick={onClose} aria-label="Fermer">✕</button>
+        </div>
 
-        {isAdmin && (
-          <button
-            type="button"
-            className="btn primary"
-            style={{ padding: '8px 14px' }}
-            onClick={openCreateModal}
-          >
+        {/* Stepper */}
+        <div className="bs-stepper">
+          {STEPS.map((label, i) => (
+            <div key={i} className={`bs-step ${i === step ? 'bs-step--active' : ''} ${i < step ? 'bs-step--done' : ''}`}>
+              <div className="bs-step-dot">{i < step ? '✓' : i + 1}</div>
+              <span className="bs-step-label">{label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="bs-modal-body">
+          {error && <div className="bs-alert bs-alert--error">{error}</div>}
+          {renderStep()}
+        </div>
+
+        {/* Footer */}
+        <div className="bs-modal-footer">
+          {step > 0
+            ? <button className="bs-btn bs-btn--secondary" onClick={prev}>Précédent</button>
+            : <button className="bs-btn bs-btn--ghost" onClick={onClose}>Annuler</button>
+          }
+          {step < 3
+            ? <button className="bs-btn bs-btn--primary" onClick={next}>Suivant</button>
+            : <button className="bs-btn bs-btn--primary" onClick={submit} disabled={saving}>
+                {saving ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SILENCE_LABELS: Record<string, string> = {
+  '300': '5 min', '600': '10 min', '900': '15 min', '1800': '30 min', '3600': '1 h',
+};
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bs-summary-row">
+      <span className="bs-summary-label">{label}</span>
+      <span className="bs-summary-value">{value}</span>
+    </div>
+  );
+}
+
+// ─── Badges helpers ───────────────────────────────────────────────────────────
+
+const CRIT_CLASS: Record<string, string> = {
+  faible: 'bs-badge--success', moyenne: 'bs-badge--warning',
+  elevee: 'bs-badge--danger',  critique: 'bs-badge--critical',
+};
+
+const ENV_CLASS: Record<string, string> = {
+  production: 'bs-badge--danger', staging: 'bs-badge--warning',
+  test: 'bs-badge--info', developpement: 'bs-badge--neutral',
+};
+
+// ─── Page principale ──────────────────────────────────────────────────────────
+
+export function SourcesPage() {
+  const [sources, setSources] = useState<Source[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const fetchSources = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get<unknown>('/sources', { params: { page: 1, size: 50 } });
+      setSources(toList<Source>(data));
+    } catch {
+      setSources([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchSources(); }, [fetchSources]);
+
+  const filtered = sources.filter(s =>
+    s.name.toLowerCase().includes(search.toLowerCase()) ||
+    (s.config.hostname ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (s.config.ip_address ?? '').includes(search)
+  );
+
+  async function toggleSource(id: string, active: boolean) {
+    try {
+      await api.patch(`/sources/${id}`, { active: !active });
+      fetchSources();
+    } catch { /* silencieux */ }
+  }
+
+  return (
+    <div className="bs-page">
+      {/* Toolbar */}
+      <div className="bs-toolbar">
+        <div className="bs-toolbar-left">
+          <h1 className="bs-page-title">Sources</h1>
+          <span className="bs-badge bs-badge--neutral">{sources.length}</span>
+        </div>
+        <div className="bs-toolbar-right">
+          <input
+            className="bs-input bs-search"
+            placeholder="Rechercher…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          <button className="bs-btn bs-btn--primary" onClick={() => setShowModal(true)}>
             + Nouvelle source
           </button>
-        )}
+        </div>
       </div>
 
-      <p className="empty-note" style={{ padding: '0 0 12px' }}>
-        Sources supervisées par BaolSec. Leur état de couverture est calculé
-        côté serveur à partir des événements reçus et normalisés.
-      </p>
-
-      {srcQ.isError && (
-        <p className="auth-err">
-          Impossible de charger les sources : {erreurMessage(srcQ.error)}
-        </p>
-      )}
-
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>SOURCE</th>
-              <th>TYPE</th>
-              <th>SEUIL DE SILENCE</th>
-              <th>ÉTAT</th>
-              {isAdmin && <th>ACTIONS</th>}
-            </tr>
-          </thead>
-
-          <tbody>
-            {rows.map((source) => {
-              const status = etat(covById.get(source.id));
-              const isSelected = selectedSourceId === source.id;
-
-              return (
-                <tr
-                  key={source.id}
-                  style={{ opacity: source.active ? 1 : 0.5 }}
-                >
-                  <td style={{ fontWeight: 600, color: '#dbe6f0' }}>
-                    <div>{source.name}</div>
-                    {source.description && (
-                      <small className="empty-note">{source.description}</small>
-                    )}
-                  </td>
-
-                  <td>{typeLabel(source.type)}</td>
-
+      {/* Table */}
+      {loading ? (
+        <div className="bs-loader">Chargement…</div>
+      ) : filtered.length === 0 ? (
+        <div className="bs-empty">
+          <p>Aucune source{search ? ' correspondant à votre recherche' : ' configurée'}.</p>
+          {!search && (
+            <button className="bs-btn bs-btn--primary" onClick={() => setShowModal(true)}>
+              Ajouter une source
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="bs-table-wrapper">
+          <table className="bs-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Type</th>
+                <th>Hostname / IP</th>
+                <th>Env</th>
+                <th>Criticité</th>
+                <th>Transport</th>
+                <th>Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => (
+                <tr key={s.id}>
                   <td>
-                    {source.silence_threshold_s >= 60
-                      ? `${Math.floor(source.silence_threshold_s / 60)} min`
-                      : `${source.silence_threshold_s} s`}
+                    <div className="bs-cell-primary">{s.name}</div>
+                    {s.description && <div className="bs-cell-secondary">{s.description}</div>}
                   </td>
-
                   <td>
-                    <span className={status.cls}>{status.label}</span>
+                    <span className="bs-badge bs-badge--type">{s.type}</span>
                   </td>
-
-                  {isAdmin && (
-                    <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className="rowbtn"
-                          onClick={() => selectSource(source.id)}
-                        >
-                          {isSelected ? 'Fermer' : 'Identifiants'}
-                        </button>
-
-                        {source.active && (
-                          <button
-                            type="button"
-                            className="rowbtn danger"
-                            disabled={disableMut.isPending}
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `Désactiver la source « ${source.name} » ?`,
-                                )
-                              ) {
-                                disableMut.mutate(source.id);
-                              }
-                            }}
-                          >
-                            Désactiver
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  )}
+                  <td>
+                    {s.config.hostname && <div className="bs-cell-primary">{s.config.hostname}</div>}
+                    {s.config.ip_address && <div className="bs-cell-secondary bs-mono">{s.config.ip_address}</div>}
+                    {!s.config.hostname && !s.config.ip_address && <span className="bs-muted">—</span>}
+                  </td>
+                  <td>
+                    {s.config.environment
+                      ? <span className={`bs-badge ${ENV_CLASS[s.config.environment] ?? ''}`}>{s.config.environment}</span>
+                      : <span className="bs-muted">—</span>}
+                  </td>
+                  <td>
+                    {s.config.criticality
+                      ? <span className={`bs-badge ${CRIT_CLASS[s.config.criticality] ?? ''}`}>{s.config.criticality}</span>
+                      : <span className="bs-muted">—</span>}
+                  </td>
+                  <td>
+                    <span className="bs-badge bs-badge--neutral">{s.config.transport}</span>
+                  </td>
+                  <td>
+                    <label className="bs-toggle bs-toggle--sm" title={s.active ? 'Désactiver' : 'Activer'}>
+                      <input type="checkbox" checked={s.active}
+                        onChange={() => toggleSource(s.id, s.active)} />
+                      <span className="bs-toggle-slider" />
+                    </label>
+                  </td>
                 </tr>
-              );
-            })}
-
-            {srcQ.isLoading && (
-              <tr>
-                <td colSpan={isAdmin ? 5 : 4} className="empty-note">
-                  Chargement des sources…
-                </td>
-              </tr>
-            )}
-
-            {!srcQ.isLoading && !srcQ.isError && rows.length === 0 && (
-              <tr>
-                <td colSpan={isAdmin ? 5 : 4} className="empty-note">
-                  Aucune source ne correspond à la recherche.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {disableMut.isError && (
-        <p className="auth-err">
-          Échec de la désactivation : {erreurMessage(disableMut.error)}
-        </p>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      {selectedSource && isAdmin && (
-        <section
-          style={{
-            marginTop: 20,
-            padding: 16,
-            border: '1px solid #334155',
-            borderRadius: 8,
-          }}
-        >
-          <div className="panel-head">
-            <h3>Identifiants — {selectedSource.name}</h3>
-            <button
-              type="button"
-              className="rowbtn"
-              onClick={closeCredentials}
-              disabled={rotateMut.isPending}
-            >
-              Fermer
-            </button>
-          </div>
-
-          <p className="empty-note">
-            Les secrets existants ne sont jamais consultables. Seul un nouveau
-            token peut être affiché, au moment de sa génération.
-          </p>
-
-          {credentialsQ.isLoading && (
-            <p className="empty-note">Chargement des identifiants…</p>
-          )}
-
-          {credentialsQ.isError && (
-            <p className="auth-err">
-              Impossible de charger les identifiants :{' '}
-              {erreurMessage(credentialsQ.error)}
-            </p>
-          )}
-
-          {credentialsQ.data && credentialsQ.data.length === 0 && (
-            <p className="empty-note">
-              Aucun identifiant enregistré pour cette source.
-            </p>
-          )}
-
-          {credentialsQ.data && credentialsQ.data.length > 0 && (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>TYPE</th>
-                    <th>CRÉATION</th>
-                    <th>EXPIRATION</th>
-                    <th>STATUT</th>
-                    <th>EMPREINTE CERTIFICAT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {credentialsQ.data.map((credential) => (
-                    <tr key={credential.id}>
-                      <td>
-                        {credential.credential_type === 'token'
-                          ? 'Token HTTPS'
-                          : 'Certificat client'}
-                      </td>
-                      <td>{dateLabel(credential.created_at)}</td>
-                      <td>{dateLabel(credential.expires_at)}</td>
-                      <td>
-                        {credential.revoked_at ? (
-                          <span className="down">Révoqué</span>
-                        ) : credential.expires_at &&
-                          new Date(credential.expires_at).getTime() <= Date.now() ? (
-                          <span className="down">Expiré</span>
-                        ) : (
-                          <span className="up">Actif</span>
-                        )}
-                      </td>
-                      <td>
-                        {credential.cert_fingerprint ?? '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div style={{ marginTop: 16 }}>
-            <button
-              type="button"
-              className="btn primary"
-              disabled={
-                rotateMut.isPending ||
-                !selectedSource.active ||
-                selectedSource.config.transport !== 'https'
-              }
-              onClick={rotateToken}
-            >
-              {rotateMut.isPending
-                ? 'Génération…'
-                : 'Générer / renouveler le token HTTPS'}
-            </button>
-
-            {!selectedSource.active ? (
-              <p className="empty-note">
-                Cette source est désactivée. Réactive-la avant de générer un token.
-              </p>
-            ) : selectedSource.config.transport === 'syslog' ? (
-              <p className="empty-note">
-                Cette source utilise Syslog TLS. La gestion du certificat client
-                doit être effectuée par le mécanisme dédié ; aucun token HTTPS
-                ne sera généré ici.
-              </p>
-            ) : null}
-          </div>
-
-          {rotateMut.isError && (
-            <p className="auth-err">
-              Échec de la génération du token : {erreurMessage(rotateMut.error)}
-            </p>
-          )}
-
-          {generatedCredential && (
-            <div
-              style={{
-                marginTop: 16,
-                padding: 14,
-                border: '1px solid #b45309',
-                borderRadius: 8,
-                background: '#422006',
-              }}
-            >
-              <strong style={{ color: '#fbbf24' }}>
-                Nouveau token généré
-              </strong>
-
-              <p style={{ color: '#fde68a', fontSize: 13 }}>
-                Copie et configure ce token sur le collecteur maintenant.
-                Il ne sera plus récupérable après fermeture de ce panneau ou
-                actualisation de la page.
-              </p>
-
-              <code
-                style={{
-                  display: 'block',
-                  padding: 10,
-                  borderRadius: 5,
-                  background: '#1e293b',
-                  color: '#f8fafc',
-                  overflowWrap: 'anywhere',
-                  userSelect: 'all',
-                }}
-              >
-                {generatedCredential.token}
-              </code>
-
-              <button
-                type="button"
-                className="btn"
-                style={{ marginTop: 10 }}
-                onClick={copyGeneratedToken}
-              >
-                Copier le token
-              </button>
-
-              {copyMessage && (
-                <p className="empty-note" role="status">
-                  {copyMessage}
-                </p>
-              )}
-
-              <p className="empty-note">
-                Généré le : {dateLabel(generatedCredential.created_at)}
-              </p>
-            </div>
-          )}
-        </section>
-      )}
-
-      {open && (
-        <Modal title="Nouvelle source" onClose={closeCreateModal}>
-          <form onSubmit={submit}>
-            <div className="field">
-              <label className="lbl" htmlFor="source-name">
-                Nom de la source *
-              </label>
-              <input
-                id="source-name"
-                className="input"
-                style={{ width: '100%' }}
-                value={form.name}
-                minLength={1}
-                maxLength={200}
-                required
-                autoFocus
-                placeholder="Ex. : serveur-web-production"
-                onChange={(event) =>
-                  setForm({ ...form, name: event.target.value })
-                }
-              />
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-type">
-                Type de source *
-              </label>
-              <select
-                id="source-type"
-                className="input"
-                style={{ width: '100%' }}
-                value={form.type}
-                required
-                onChange={(event) =>
-                  setForm({ ...form, type: event.target.value })
-                }
-              >
-                {SOURCE_TYPES.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <small className="empty-note">
-                Le type décrit la nature de la source, pas son protocole de
-                transport.
-              </small>
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-description">
-                Description
-              </label>
-              <textarea
-                id="source-description"
-                className="input"
-                style={{ width: '100%', minHeight: 76, resize: 'vertical' }}
-                value={form.description ?? ''}
-                maxLength={2000}
-                placeholder="Rôle ou emplacement de cet équipement"
-                onChange={(event) =>
-                  setForm({ ...form, description: event.target.value })
-                }
-              />
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-transport">
-                Transport d'ingestion *
-              </label>
-              <select
-                id="source-transport"
-                className="input"
-                style={{ width: '100%' }}
-                value={form.config?.transport ?? 'https'}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    config: {
-                      ...form.config!,
-                      transport: event.target.value as 'https' | 'syslog',
-                    },
-                  })
-                }
-              >
-                <option value="https">HTTPS — token Bearer</option>
-                <option value="syslog">Syslog TLS — certificat client</option>
-              </select>
-              <small className="empty-note">
-                Le mode Syslog nécessite un certificat client. La génération
-                de token HTTPS ne s'applique pas à ce transport.
-              </small>
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-ingestion">
-                Mode d'ingestion *
-              </label>
-              <select
-                id="source-ingestion"
-                className="input"
-                style={{ width: '100%' }}
-                value={form.config?.ingestion_mode ?? 'direct'}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    config: {
-                      ...form.config!,
-                      ingestion_mode: event.target.value as 'direct' | 'rejeu',
-                    },
-                  })
-                }
-              >
-                <option value="direct">Direct</option>
-                <option value="rejeu">Rejeu</option>
-              </select>
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-host">
-                Hôte de la source
-              </label>
-              <input
-                id="source-host"
-                className="input"
-                style={{ width: '100%' }}
-                value={form.config?.host ?? ''}
-                maxLength={253}
-                placeholder="Ex. : srv-web-01 ou 192.0.2.10"
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    config: { ...form.config!, host: event.target.value },
-                  })
-                }
-              />
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-criticality">
-                Criticité
-              </label>
-              <select
-                id="source-criticality"
-                className="input"
-                style={{ width: '100%' }}
-                value={form.config?.criticality ?? 'moyenne'}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    config: {
-                      ...form.config!,
-                      criticality: event.target.value as
-                        | 'faible'
-                        | 'moyenne'
-                        | 'elevee'
-                        | 'critique',
-                    },
-                  })
-                }
-              >
-                <option value="faible">Faible</option>
-                <option value="moyenne">Moyenne</option>
-                <option value="elevee">Élevée</option>
-                <option value="critique">Critique</option>
-              </select>
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-volume">
-                Volume minimal attendu (événements/heure)
-              </label>
-              <input
-                id="source-volume"
-                className="input"
-                style={{ width: '100%' }}
-                type="number"
-                min={0}
-                step={1}
-                value={form.config?.expected_min_events_per_h ?? ''}
-                placeholder="Facultatif"
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    config: {
-                      ...form.config!,
-                      expected_min_events_per_h:
-                        event.target.value === ''
-                          ? null
-                          : Number(event.target.value),
-                    },
-                  })
-                }
-              />
-              <small className="empty-note">
-                Valeur indicative enregistrée pour la supervision. Elle ne
-                constitue pas encore un seuil de détection automatique.
-              </small>
-            </div>
-
-            <div className="field">
-              <label className="lbl" htmlFor="source-silence">
-                Seuil de silence (secondes) *
-              </label>
-              <input
-                id="source-silence"
-                className="input"
-                style={{ width: '100%' }}
-                type="number"
-                min={1}
-                step={1}
-                required
-                value={form.silence_threshold_s}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    silence_threshold_s: Number(event.target.value),
-                  })
-                }
-              />
-              <small className="empty-note">
-                La source sera considérée comme silencieuse si aucun événement
-                n'est reçu au-delà de ce délai.
-              </small>
-            </div>
-
-            {createMut.isError && (
-              <p className="auth-err">
-                Échec de la création : {erreurMessage(createMut.error)}
-              </p>
-            )}
-
-            <div className="actions">
-              <button
-                type="button"
-                className="btn"
-                onClick={closeCreateModal}
-                disabled={createMut.isPending}
-              >
-                Annuler
-              </button>
-
-              <button
-                type="submit"
-                className="btn primary"
-                disabled={
-                  createMut.isPending ||
-                  !form.name.trim() ||
-                  !Number.isInteger(form.silence_threshold_s ?? 0) ||
-                  (form.silence_threshold_s ?? 0) <= 0
-                }
-              >
-                {createMut.isPending ? 'Création…' : 'Créer la source'}
-              </button>
-            </div>
-          </form>
-        </Modal>
+      {/* Modal */}
+      {showModal && (
+        <SourceModal
+          onClose={() => setShowModal(false)}
+          onCreated={fetchSources}
+        />
       )}
     </div>
   );

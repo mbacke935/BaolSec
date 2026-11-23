@@ -3,15 +3,17 @@
  * Réutilise les types de C22 et ajoute les endpoints d'analyse.
  */
 import { apiClient } from './client';
-import type { IncidentState, Severity, AlertStatus } from '../types/api';
-// Réexport pour les pages d'analyse qui réutilisent ces types (C23).
-export type { IncidentState, Severity, AlertStatus };
+import type { IncidentState, Severity } from '../types/api';
 
-/** En-tête d'idempotence pour les commandes (C5 : l'API l'utilise comme command_id). */
-function idem() {
-  const key = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-  return { headers: { 'Idempotency-Key': key } };
+/** Normalise une réponse API qui peut être un tableau direct ou {data:[]} / {items:[]} */
+export function toList<T>(raw: unknown): T[] {
+  if (Array.isArray(raw)) return raw as T[];
+  if (Array.isArray((raw as any)?.data)) return (raw as any).data as T[];
+  if (Array.isArray((raw as any)?.items)) return (raw as any).items as T[];
+  return [];
 }
+// Réexport pour les pages d'analyse qui réutilisent ces types (C23).
+export type { IncidentState, Severity };
 
 // ── Incidents ─────────────────────────────────────────────────────────────────
 
@@ -41,15 +43,13 @@ export interface TimelineEntry {
 }
 
 export interface Alert {
-  id: string;                       // alert_id (texte déterministe)
-  rule_id: string;
-  severity: Severity;
-  status: AlertStatus;              // état de triage (incidents.alert_state)
-  assigned_to: string | null;
+  id: string;
   incident_id: string | null;
+  rule_id: string | null;
+  source_id: string | null;
+  severity: Severity;
   title: string;
   detail: Record<string, unknown>;
-  source_id?: string | null;        // non renvoyé par l'API (doc immuable OpenSearch)
   fired_at: string;
 }
 
@@ -84,26 +84,13 @@ export const incidents = {
   alerts: (id: string) =>
     apiClient.get<Alert[]>(`/incidents/${id}/alerts`).then((r) => r.data),
 
-  // Commandes (transmises au service Incidents, Analyste seul) avec Idempotency-Key.
   updateState: (id: string, state: IncidentState, comment?: string) =>
-    apiClient.post(`/incidents/${id}/status`, { state, comment }, idem()).then((r) => r.data),
-
-  assign: (id: string, assigned_to: string | null) =>
-    apiClient.post(`/incidents/${id}/assign`, { assigned_to }, idem()).then((r) => r.data),
-
-  comment: (id: string, body: string) =>
-    apiClient.post(`/incidents/${id}/comment`, { body }, idem()).then((r) => r.data),
+    apiClient.post<Incident>(`/incidents/${id}/status`, { state, comment }).then((r) => r.data),
 };
 
 export const alerts = {
-  list: (params?: { limit?: number; offset?: number; rule_id?: string; alert_status?: AlertStatus }) =>
+  list: (params?: { limit?: number; offset?: number; rule_id?: string; source_id?: string }) =>
     apiClient.get<Alert[]>('/alerts', { params }).then((r) => r.data),
-
-  updateStatus: (id: string, status: AlertStatus) =>
-    apiClient.post(`/alerts/${encodeURIComponent(id)}/status`, { status }, idem()).then((r) => r.data),
-
-  assign: (id: string, assigned_to: string | null) =>
-    apiClient.post(`/alerts/${encodeURIComponent(id)}/assign`, { assigned_to }, idem()).then((r) => r.data),
 };
 
 export const coverage = {

@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from ..dependencies import get_conn, require_role
-from ..models import RuleCreate, RuleResponse, RuleUpdate, UserRole
+from ..dependencies import get_conn, paginate, require_role
+from ..models import Page, RuleCreate, RuleResponse, RuleUpdate, UserRole
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 
@@ -29,7 +29,7 @@ _COLS = """id, name, description,
            created_at, updated_at"""
 
 
-@router.get("", response_model=list[RuleResponse])
+@router.get("", response_model=Page[RuleResponse])
 async def list_rules(
     conn: Annotated[AsyncConnection, Depends(get_conn)],
     _user=_READ,
@@ -37,13 +37,10 @@ async def list_rules(
     offset: int = Query(0, ge=0),
     enabled_only: bool = False,
 ):
-    q = f"SELECT {_COLS} FROM config.rules"
-    if enabled_only:
-        q += " WHERE is_enabled = TRUE"
-    q += " ORDER BY name LIMIT %s OFFSET %s"
-    async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(q, [limit, offset])
-        return await cur.fetchall()
+    where = " WHERE is_enabled = TRUE" if enabled_only else ""
+    select_sql = f"SELECT {_COLS} FROM config.rules{where} ORDER BY name"
+    count_sql = f"SELECT COUNT(*) AS count FROM config.rules{where}"
+    return await paginate(conn, select_sql, count_sql, [], limit, offset)
 
 
 @router.post("", response_model=RuleResponse, status_code=status.HTTP_201_CREATED)

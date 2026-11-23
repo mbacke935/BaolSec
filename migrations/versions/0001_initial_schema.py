@@ -23,6 +23,14 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # ── Extensions & schémas ───────────────────────────────────────────────────
+
+    op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+    op.execute("CREATE SCHEMA IF NOT EXISTS acces")
+    op.execute("CREATE SCHEMA IF NOT EXISTS config")
+    op.execute("CREATE SCHEMA IF NOT EXISTS incidents")
+    op.execute("CREATE SCHEMA IF NOT EXISTS couverture")
+
     # ── Enum types ─────────────────────────────────────────────────────────────
 
     op.execute("""
@@ -226,3 +234,7 @@ def downgrade() -> None:
     op.execute("DROP TYPE IF EXISTS incidents.severity CASCADE")
     op.execute("DROP TYPE IF EXISTS incidents.incident_state CASCADE")
     op.execute("DROP TYPE IF EXISTS acces.user_role CASCADE")
+    op.execute("DROP SCHEMA IF EXISTS couverture CASCADE")
+    op.execute("DROP SCHEMA IF EXISTS incidents CASCADE")
+    op.execute("DROP SCHEMA IF EXISTS config CASCADE")
+    op.execute("DROP SCHEMA IF EXISTS acces CASCADE")

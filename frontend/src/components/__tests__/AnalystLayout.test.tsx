@@ -35,7 +35,7 @@ describe('AnalystLayout', () => {
   });
 
   it('affiche l\'email utilisateur si fourni', () => {
-    wrap(<AnalystLayout userEmail="analyst@baolsec.sn"><div /></AnalystLayout>);
+    wrap(<AnalystLayout><div /></AnalystLayout>);
     expect(screen.getByText('analyst@baolsec.sn')).toBeInTheDocument();
   });
 

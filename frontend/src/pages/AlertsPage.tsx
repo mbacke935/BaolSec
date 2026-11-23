@@ -1,81 +1,184 @@
-/** Centre des alertes — lecture incidents.alert_state ; triage par l'Analyste (commande statut_alerte). */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { alerts } from '../api/analyst';
-import type { AlertStatus } from '../types/api';
-import { useAuth } from '../hooks/useAuth';
-import { useSearch } from '../components/AppShell';
-import { sevBadge } from '../lib/ui';
+import type { CSSProperties } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { alerts as alertsApi, toList } from '../api/analyst';
+import type { Alert } from '../api/analyst';
+import '../styles/design-system.css';
 
-const STATUS_LABEL: Record<AlertStatus, string> = {
-  nouvelle: 'Nouvelle',
-  en_cours: 'En cours',
-  cloturee: 'Clôturée',
-};
+function relTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1)  return 'à l\'instant';
+  if (mins < 60) return `${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)  return `${hrs} h`;
+  return `${Math.floor(hrs / 24)} j`;
+}
 
 export function AlertsPage() {
-  const q = useSearch().toLowerCase();
-  const { user } = useAuth();
-  const isAnalyst = user?.role === 'ANALYST';
-  const qc = useQueryClient();
+  const [page, setPage] = useState(0);
+  const [filter, setFilter] = useState('');
+  const limit = 50;
 
-  const alertQ = useQuery({ queryKey: ['alerts'], queryFn: () => alerts.list({ limit: 200 }) });
-  const statusMut = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: AlertStatus }) => alerts.updateStatus(id, status),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }),
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['alerts', page],
+    queryFn: () => alertsApi.list({ limit, offset: page * limit }),
+    refetchInterval: 30_000,
   });
 
-  const rows = (alertQ.data ?? []).filter((a) =>
-    !q || `${a.id} ${a.rule_id} ${a.title} ${a.severity} ${a.status}`.toLowerCase().includes(q),
-  );
+  const list     = toList<Alert>(data);
+  const critique = list.filter((a) => a.severity === 'CRITIQUE').length;
+  const eleve    = list.filter((a) => a.severity === 'ELEVE').length;
+
+  const filtered = filter.trim()
+    ? list.filter(
+        (a) =>
+          a.title?.toLowerCase().includes(filter.toLowerCase()) ||
+          a.rule_id?.toLowerCase().includes(filter.toLowerCase()),
+      )
+    : list;
 
   return (
-    <div className="panel">
-      <h3>Centre des alertes</h3>
-      <p className="empty-note" style={{ padding: '0 0 12px' }}>
-        {isAnalyst ? 'Qualifiez les alertes (le changement de statut est transmis au service Incidents).'
-                   : 'Lecture seule — le traitement des alertes est réservé à l\'Analyste (C5).'}
-      </p>
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr><th>IDENTIFIANT</th><th>RÈGLE</th><th>GRAVITÉ</th><th>STATUT</th><th>ANALYSTE</th></tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => {
-              const b = sevBadge(a.severity);
-              return (
-                <tr key={a.id}>
-                  <td style={{ fontFamily: 'ui-monospace,monospace', fontSize: 11 }}>{a.id.slice(0, 22)}</td>
-                  <td>{a.title || a.rule_id.slice(0, 8)}</td>
-                  <td><span className={b.cls}>{b.label}</span></td>
-                  <td>
-                    {isAnalyst ? (
-                      <select
-                        className="input"
-                        style={{ padding: '3px 8px', fontSize: 11 }}
-                        value={a.status}
-                        disabled={statusMut.isPending}
-                        onChange={(e) => statusMut.mutate({ id: a.id, status: e.target.value as AlertStatus })}
-                      >
-                        {(Object.keys(STATUS_LABEL) as AlertStatus[]).map((s) => (
-                          <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className={a.status === 'cloturee' ? 'state-pill mute' : 'state-pill'}>{STATUS_LABEL[a.status]}</span>
-                    )}
-                  </td>
-                  <td>{a.assigned_to ? a.assigned_to.slice(0, 8) : 'Non assignée'}</td>
-                </tr>
-              );
-            })}
-            {alertQ.isLoading && <tr><td colSpan={5} className="empty-note">Chargement…</td></tr>}
-            {!alertQ.isLoading && rows.length === 0 && (
-              <tr><td colSpan={5} className="empty-note">Aucune alerte à afficher.</td></tr>
-            )}
-          </tbody>
-        </table>
+    <>
+      <div className="bs-page-header">
+        <div>
+          <h1 className="bs-page-title"><span>Alertes</span></h1>
+          <p className="bs-page-sub">Actualisation automatique toutes les 30 secondes</p>
+        </div>
+        {isFetching && !isLoading && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg4)' }}>
+            <span className="bs-spinner" style={{ width: 12, height: 12 }} /> Actualisation…
+          </span>
+        )}
       </div>
-    </div>
+
+      {/* KPIs */}
+      <div className="bs-kpi-grid">
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--danger)' } as CSSProperties}>
+          <div className="bs-kpi-label">Critique</div>
+          <div className={`bs-kpi-value ${critique > 0 ? 'bs-glow-danger' : ''}`}>
+            {isLoading ? '…' : critique}
+          </div>
+          <div className="bs-kpi-sub">Alertes de niveau critique</div>
+        </div>
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--warn)' } as CSSProperties}>
+          <div className="bs-kpi-label">Élevé</div>
+          <div className={`bs-kpi-value ${eleve > 0 ? 'bs-glow-warn' : ''}`}>
+            {isLoading ? '…' : eleve}
+          </div>
+          <div className="bs-kpi-sub">Alertes de niveau élevé</div>
+        </div>
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent2)' } as CSSProperties}>
+          <div className="bs-kpi-label">Total (page)</div>
+          <div className="bs-kpi-value">{isLoading ? '…' : list.length}</div>
+          <div className="bs-kpi-sub">Alertes sur cette page</div>
+        </div>
+        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent)' } as CSSProperties}>
+          <div className="bs-kpi-label">Pagination</div>
+          <div className="bs-kpi-value">{page + 1}</div>
+          <div className="bs-kpi-sub">Page actuelle</div>
+        </div>
+      </div>
+
+      {/* Filtre */}
+      <div className="bs-filter-bar">
+        <div className="bs-input-wrap" style={{ flex: 1, maxWidth: 420 }}>
+          <span className="bs-input-icon">⌕</span>
+          <input
+            className="bs-input"
+            type="text"
+            placeholder="Filtrer par titre ou identifiant de règle…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        </div>
+        {filter && (
+          <span className="bs-stat-pill">
+            {filtered.length} résultat(s)
+          </span>
+        )}
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="bs-loading"><div className="bs-spinner" /> Chargement des alertes…</div>
+      ) : (
+        <div className="bs-card" style={{ padding: 0 }}>
+          <div className="bs-table-wrap" style={{ border: 'none', borderRadius: 'var(--radius) var(--radius) 0 0' }}>
+            <table className="bs-table">
+              <thead>
+                <tr>
+                  <th>Sévérité</th>
+                  <th>Règle déclenchée</th>
+                  <th>Source</th>
+                  <th>Titre / Message</th>
+                  <th>Délai</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((a) => (
+                  <tr key={a.id}>
+                    <td>
+                      <span className={`bs-badge ${a.severity.toLowerCase()}`}>{a.severity}</span>
+                    </td>
+                    <td style={{ color: 'var(--fg)', fontWeight: 500, fontSize: 13 }}>
+                      {a.rule_id ?? <span className="bs-text-muted">—</span>}
+                    </td>
+                    <td>
+                      <span className="bs-code">{a.source_id ?? '—'}</span>
+                    </td>
+                    <td style={{ color: 'var(--fg2)', fontSize: 12, maxWidth: 300 }}>
+                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {a.title}
+                      </span>
+                    </td>
+                    <td className="bs-mono" style={{ fontSize: 11, color: 'var(--fg4)', whiteSpace: 'nowrap' }}>
+                      {relTime(a.fired_at)}
+                    </td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>
+                      <div className="bs-empty">
+                        <div className="bs-empty-icon">◉</div>
+                        <div className="bs-empty-text">Aucune alerte trouvée</div>
+                        <div className="bs-empty-sub">
+                          {filter ? 'Modifiez votre filtre' : 'Aucune alerte sur cette page'}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 16px', borderTop: '1px solid var(--border)',
+          }}>
+            <button
+              className="bs-btn bs-btn-secondary bs-btn-sm"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+            >
+              ← Précédent
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--fg4)' }}>
+              Page {page + 1} · {list.length} alerte(s)
+            </span>
+            <button
+              className="bs-btn bs-btn-secondary bs-btn-sm"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={list.length < limit}
+            >
+              Suivant →
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

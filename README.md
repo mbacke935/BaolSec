@@ -1,22 +1,27 @@
 # BaolSec — SIEM distribué
 
-BaolSec collecte les journaux et événements de sécurité, détecte les comportements
-suspects via des règles configurables, corrèle les alertes en incidents et offre
-une interface de supervision unifiée. La plateforme est distribuée en services
-(passerelle d'ingestion, normalisation, détection, construction d'incidents,
-couverture, indexation, API, frontend) reliés par un broker NATS JetStream, avec
-PostgreSQL (schéma normalisé C4) et OpenSearch.
+Plateforme SIEM (Security Information and Event Management) distribuée,
+développée dans le cadre d'un projet de fin d'études (L3 Informatique).
 
-Deux chemins d'exécution coexistent :
+## Architecture
 
-- **Pile complète en conteneurs** — `compose.yaml` à la racine (C18), pour lancer
-  toute la plateforme d'une commande.
-- **Développement local piloté par le Makefile** — `infrastructure/compose/`, pour
-  monter les briques une par une et itérer (c'est le chemin utilisé en dev/tests).
+```
+agents (Fluent Bit)
+    ↓ HTTPS/Syslog TLS
+ingestion-gateway
+    ↓ NATS JetStream
+normalization-worker → detection-worker → incident-builder
+                                        ↓
+                              indexing-worker → OpenSearch
+                                        ↓
+                              coverage-worker → PostgreSQL
+                                        ↓
+                                   baolsec-api
+                                        ↓
+                                     frontend (React)
+```
 
----
-
-## Démarrage rapide — pile complète (Docker Compose)
+## Démarrage rapide
 
 ```bash
 # 1. Copier et remplir les secrets
@@ -31,102 +36,49 @@ docker compose ps
 docker compose logs -f
 ```
 
-### Services exposés
+## Services exposés
 
-| Service               | Port local | Description                       |
-|-----------------------|------------|-----------------------------------|
-| API BaolSec           | 8000       | API REST principale               |
-| Frontend (conteneur)  | 3000       | Interface React (build servi)     |
-| Grafana               | 3001       | Supervision (admin/changeme)      |
-| Prometheus            | 9090       | Métriques brutes                  |
-| OpenSearch            | 9200       | Recherche (interne)               |
-| OpenSearch Dashboards | 5601       | Exploration des index OpenSearch  |
-| NATS (monitoring)     | 8222       | Dashboard NATS                    |
+| Service               | Port local | Description                        |
+|-----------------------|------------|------------------------------------|
+| API BaolSec           | 8000       | API REST principale                |
+| Frontend              | 3000       | Interface React (analyste + admin) |
+| Grafana               | 3001       | Supervision (admin / voir .env)    |
+| Prometheus            | 9090       | Métriques brutes                   |
+| OpenSearch            | 9200       | Moteur de recherche (interne)      |
+| OpenSearch Dashboards | 5601       | Interface OpenSearch               |
+| NATS monitoring       | 8222       | Dashboard broker                   |
+| Syslog UDP/TCP        | 5514       | Réception logs équipements         |
+| HTTP push             | 8080       | Réception logs HTTP                |
 
----
+## Versions des images
 
-## Développement local (Makefile)
+| Image                           | Version  |
+|---------------------------------|----------|
+| `nats`                          | 2.15     |
+| `postgres`                      | 17       |
+| `opensearchproject/opensearch`  | 2.18.0   |
+| `opensearchproject/opensearch-dashboards` | 2.18.0 |
+| `fluent/fluent-bit`             | 3.2      |
+| `prom/prometheus`               | v3.2.1   |
+| `grafana/grafana`               | 11.5.2   |
 
-Le Makefile monte la pile depuis `infrastructure/compose/` et applique le schéma
-normalisé C4 (table `acces` avec rôles en FK) via `make db-up`.
+## Réseaux Docker
 
-```bash
-cp .env.example .env    # renseigner POSTGRES_PASSWORD, SVC_*_PASSWORD, JWT_SECRET, NATS_TOKEN…
-
-make broker-up          # NATS JetStream
-make db-up              # PostgreSQL + migrations (schéma normalisé C4) + comptes de service
-make incidents-up       # chaîne d'ingestion → normalisation → détection → incidents
-```
-
-### API + interface en local
-
-L'API et l'interface se branchent sur **la même base que la pipeline**.
-
-```bash
-cd services/baolsec-api
-
-# Compte administrateur de démonstration (propriétaire de la base)
-( set -a; . ../../.env; set +a
-  POSTGRES_DSN="postgresql://postgres:$POSTGRES_PASSWORD@127.0.0.1:5432/baolsec" \
-    uv run --python 3.13 --extra dev python seed_admin.py )
-
-# API (compte de service svc_api, moindre privilège) — http://localhost:8000
-( set -a; . ../../.env; set +a
-  POSTGRES_DSN="postgresql://svc_api:$SVC_API_PASSWORD@127.0.0.1:5432/baolsec" \
-  JWT_SECRET="$JWT_SECRET" \
-    uv run --python 3.13 --extra dev uvicorn baolsec_api.main:app --port 8000 )
-```
-
-```bash
-# Frontend (serveur de dev Vite, proxy /api → localhost:8000) — http://localhost:5173
-cd frontend
-npm install
-npm run dev
-```
-
-Connexion de démonstration : `admin@baolsec.local` / `Admin1234!`.
-
-> `make db-up` nécessite au moins `POSTGRES_PASSWORD` dans `.env`. Lancées à la main,
-> les commandes ci-dessus sourcent `.env` dans un sous-shell (`set -a; . ../../.env`) ;
-> sans cela les secrets sont vides et PostgreSQL refuse la connexion
-> (`fe_sendauth: no password supplied`).
-
----
-
-## Interfaces
-
-Le frontend (React 18 + TypeScript + Vite, design **BaolSec Nexus**) se compose de :
-
-- une **landing publique** (`/`) présentant la plateforme ;
-- une **connexion** (`/login`) par identifiants, échangés contre un JWT (jetons
-  courts + renouvellement, C3/C5) ;
-- un **espace de travail unifié** (`/app`) protégé par authentification, avec une
-  barre latérale à sept vues : **Vue générale** (KPI, répartition des alertes,
-  alertes récentes), **Événements** (recherche OpenSearch), **Alertes**,
-  **Incidents** (+ chronologie), **Sources** (état de couverture), **Détection**
-  (règles), **Supervision**. La vue **Utilisateurs** n'apparaît que pour le rôle
-  Administrateur.
-
-Les droits sont **vérifiés par l'API à chaque requête** (RBAC côté serveur) : le
-masquage d'éléments dans l'interface est un confort, pas un contrôle de sécurité.
-
----
-
-## Réseaux Docker (pile complète)
-
-- `baolsec-data` : broker, BDD (isolé)
-- `baolsec-ingest` : passerelle + agents
-- `baolsec-backend` : workers + API
-- `baolsec-obs` : Prometheus, Grafana, Fluent Bit
+| Réseau            | Rôle                                      |
+|-------------------|-------------------------------------------|
+| `baolsec-data`    | Broker, PostgreSQL, OpenSearch (isolé)    |
+| `baolsec-ingest`  | Passerelle + agents                       |
+| `baolsec-backend` | Workers + API                             |
+| `baolsec-obs`     | Prometheus, Grafana, Fluent Bit           |
 
 ## Volumes persistants
 
 ```
-nats-data        # JetStream
+nats-data        # JetStream (broker)
 postgres-data    # PostgreSQL
 opensearch-data  # Index OpenSearch
-prometheus-data  # Métriques 30j
-grafana-data     # Dashboards
+prometheus-data  # Métriques 30 jours
+grafana-data     # Dashboards Grafana
 ```
 
 ## Commandes utiles
@@ -138,13 +90,54 @@ docker compose down
 # Suppression complète (avec données)
 docker compose down -v
 
-# Reconstruire un service
-docker compose build incident-builder
-docker compose up -d --no-deps incident-builder
+# Reconstruire un service spécifique
+docker compose build coverage-worker
+docker compose up -d --no-deps coverage-worker
 
 # Logs d'un service
-docker compose logs -f coverage-worker
+docker compose logs -f api
+docker compose logs -f incident-builder
 
 # État des healthchecks
 docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+
+# Redémarrer un service sans rebuild
+docker compose restart coverage-worker
+```
+
+## Variables d'environnement requises (.env)
+
+| Variable                | Description                              |
+|-------------------------|------------------------------------------|
+| `NATS_TOKEN`            | Jeton d'authentification NATS            |
+| `POSTGRES_PASSWORD`     | Mot de passe PostgreSQL (compte baolsec) |
+| `SVC_API_PASSWORD`      | Mot de passe compte svc_api              |
+| `SVC_PASSERELLE_PASSWORD` | Mot de passe compte svc_passerelle     |
+| `SVC_NORMALISATION_PASSWORD` | Mot de passe compte svc_normalisation |
+| `SVC_DETECTION_PASSWORD` | Mot de passe compte svc_detection      |
+| `SVC_INCIDENTS_PASSWORD` | Mot de passe compte svc_incidents      |
+| `SVC_COUVERTURE_PASSWORD` | Mot de passe compte svc_couverture    |
+| `OPENSEARCH_PASSWORD`   | Mot de passe admin OpenSearch            |
+| `JWT_SECRET`            | Secret JWT pour l'API (min. 32 chars)    |
+| `COMMAND_TOKEN`         | Token commandes incidents (min. 32 chars)|
+| `GRAFANA_PASSWORD`      | Mot de passe admin Grafana               |
+
+## Structure du dépôt
+
+```
+baolsec/
+├── compose.yaml                  # Stack complète (C18)
+├── docker/                       # Configs Fluent Bit, Prometheus, Grafana
+├── services/
+│   ├── baolsec-api/              # API REST FastAPI
+│   ├── frontend/                 # Interface React + TypeScript
+│   ├── coverage-worker/          # Suivi couverture des sources
+│   ├── incident-builder/         # Gestion des incidents
+│   ├── indexing-worker/          # Indexation OpenSearch
+│   ├── detection-worker/         # Moteur de détection
+│   ├── normalization-worker/     # Normalisation des événements
+│   └── ingestion-gateway/        # Passerelle d'ingestion
+├── infrastructure/
+│   └── compose/                  # Compose de développement (sans obs)
+└── migrations/                   # Migrations Alembic (PostgreSQL)
 ```

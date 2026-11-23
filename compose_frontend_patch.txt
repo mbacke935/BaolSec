@@ -1,0 +1,30 @@
+REMPLACER dans compose.yaml la section frontend :
+
+  frontend:
+    profiles: ["todo"]   # Dockerfile à créer dans frontend/
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    <<: *restart-policy
+    environment:
+      VITE_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks: [baolsec-backend]
+    logging: *fluent-logging
+
+PAR :
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    <<: *restart-policy
+    ports:
+      - "5174:80"
+    depends_on:
+      - api
+    networks: [baolsec-backend]
+    logging: *fluent-logging
