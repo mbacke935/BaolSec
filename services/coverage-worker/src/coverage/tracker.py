@@ -141,7 +141,10 @@ class ProcessingTracker:
             # normalized_event/v1 : source dans baolsec.source
             source_id = uuid.UUID(doc["baolsec"]["source"]["id"])
             # @timestamp = horodatage de l'événement normalisé (toujours présent)
-            processed_at = _parse_ts(doc["@timestamp"])
+            # Heure de réception à la passerelle (même horloge que raw-events) : comparable à
+            # last_received_at pour détecter une normalisation à l'arrêt (EF-09). @timestamp
+            # (heure de l'événement) n'est qu'un repli : un rejeu ancien paraîtrait sinon en retard.
+            processed_at = _parse_ts((doc.get("baolsec") or {}).get("received_at") or doc["@timestamp"])
         except Exception as exc:
             log.warning("ProcessingTracker : message illisible (%s), ignoré", exc)
             await msg.ack()

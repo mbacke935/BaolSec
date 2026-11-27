@@ -18,8 +18,9 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from .. import commandclient
+from . import search
 from ..dependencies import get_conn, get_current_user, require_role
-from ..models import AlertResponse, AlertStatus, TokenPayload, UserRole
+from ..models import AlertResponse, AlertStatus, Severity, TokenPayload, UserRole
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -28,10 +29,15 @@ _ANALYST = Depends(require_role(UserRole.ANALYST))  # commandes réservées à l
 
 _COLS = """a.alert_id AS id, a.rule_id, a.severity, a.status, a.assigned_to,
            ia.incident_id, r.name AS title, '{}'::jsonb AS detail,
-           a.triggered_at AS fired_at
+           a.triggered_at AS fired_at,
+           substring(rv.definition_yaml from '(?n)^id:[[:space:]]*([A-Z]{2,6}-[0-9]{3})') AS rule_code,
+           u.username AS assigned_to_name, i.title AS incident_title
       FROM incidents.alert_state a
       JOIN config.rules r ON r.id = a.rule_id
-      LEFT JOIN incidents.incident_alerts ia ON ia.alert_id = a.alert_id"""
+      LEFT JOIN config.rule_versions rv ON rv.rule_id = r.id AND rv.version = r.current_version
+      LEFT JOIN acces.users u ON u.id = a.assigned_to
+      LEFT JOIN incidents.incident_alerts ia ON ia.alert_id = a.alert_id
+      LEFT JOIN incidents.incidents i ON i.id = ia.incident_id"""
 
 
 def _issuer(current: TokenPayload) -> dict[str, str]:
@@ -46,12 +52,21 @@ async def list_alerts(
     offset: int = Query(0, ge=0),
     rule_id: uuid.UUID | None = None,
     alert_status: AlertStatus | None = None,
+    status_: Annotated[AlertStatus | None, Query(alias="status")] = None,
+    severity: Severity | None = None,
+    assigned_to_me: bool = False,
+    current: Annotated[TokenPayload, Depends(get_current_user)] = None,
 ):
     conds, args = [], []
     if rule_id:
         conds.append("a.rule_id = %s"); args.append(rule_id)
-    if alert_status:
-        conds.append("a.status = %s"); args.append(alert_status.value)
+    wanted = alert_status or status_
+    if wanted:
+        conds.append("a.status = %s"); args.append(wanted.value)
+    if severity:
+        conds.append("a.severity = %s"); args.append(severity.value)
+    if assigned_to_me and current is not None:
+        conds.append("a.assigned_to = %s"); args.append(current.sub)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     q = f"SELECT {_COLS} {where} ORDER BY a.triggered_at DESC LIMIT %s OFFSET %s"
     args.extend([limit, offset])
@@ -71,6 +86,9 @@ async def get_alert(
         row = await cur.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerte introuvable")
+    evidence = await search.alert_evidence(alert_id)
+    row = dict(row)
+    row["detail"] = evidence
     return row
 
 
@@ -110,7 +128,7 @@ async def assign_alert(
             command_type="assigner_alerte",
             target={"alert_id": alert_id},
             issued_by=_issuer(current),
-            payload={"assigned_to": body.get("assigned_to")},
+            payload={"assignee_id": commandclient.assignee_from(body)},
             idempotency_key=idempotency_key,
         )
     except commandclient.CommandError as exc:

@@ -1,9 +1,10 @@
-.PHONY: help up down test broker-up broker-init broker-restart broker-reset test-broker bench-broker gateway-dev gateway-up test-gateway agents-up agents-check test-agents normalizer-up test-normalizer fetch-datasets bench-normalizer \
+.PHONY: help up down test admin-create journaux broker-up broker-init broker-restart broker-reset test-broker bench-broker gateway-dev gateway-up test-gateway agents-up agents-check test-agents normalizer-up test-normalizer fetch-datasets bench-normalizer \
         dlq-list dlq-show dlq-replay dlq-purge dlq-monitor-up test-resilience \
         db-up db-migrate db-seed db-psql db-reset test-db rules-load detection-up test-detection bench-detection \
         incidents-up test-incidents alerts-list alerts-count
 
-COMPOSE = docker compose --env-file .env -f infrastructure/compose/compose.yaml
+# Pile complète : compose.yaml racine (inclut infrastructure/compose/compose.yaml + Prometheus/Grafana)
+COMPOSE = docker compose --env-file .env -f compose.yaml
 # Depuis la machine hôte, le broker est joint par le port publié sur 127.0.0.1.
 WITH_ENV = set -a; . ./.env; set +a; BROKER_URL=nats://localhost:4222;
 UV_TEST = uv run --with-editable shared/python-common --with nats-py==2.16.0 --with pytest \
@@ -38,6 +39,8 @@ help:
 	@echo "make db-up          : PostgreSQL + migrations et mots de passe des comptes de service"
 	@echo "make db-migrate     : réappliquer les migrations (infrastructure/database)"
 	@echo "make db-seed        : copier les sources de développement dans config.sources"
+	@echo "make journaux       : journaux des services, lisibles (ARGS=\"--suivre --service incidents --niveau attention\")"
+	@echo "make admin-create   : créer ou réinitialiser le compte administrateur (ADMIN_EMAIL=… ADMIN_PW=…)"
 	@echo "make db-psql        : console psql sur la base baolsec"
 	@echo "make db-reset       : supprimer les données PostgreSQL et recréer le schéma (développement)"
 	@echo "make test-db        : tests du schéma, des droits et des référentiels PostgreSQL"
@@ -51,6 +54,14 @@ help:
 	@echo "make alerts-count   : compteurs des alertes par statut et par sévérité"
 
 up:
+	@for f in frontend.crt frontend.key; do \
+	  p=infrastructure/tls/dev/$$f; \
+	  if [ ! -f $$p ]; then \
+	    echo "Certificat de l'interface absent : $$p"; \
+	    if [ -d $$p ]; then echo "  Docker a créé un dossier vide à sa place : sudo rmdir $$p"; fi; \
+	    echo "  puis : make gateway-dev"; exit 1; \
+	  fi; \
+	done
 	$(COMPOSE) up -d
 
 down:
@@ -166,6 +177,12 @@ db-migrate:
 
 db-seed:
 	$(WITH_ENV) DATABASE_ADMIN_URL=$(DB_ADMIN)/baolsec uv run --quiet --with "psycopg[binary]==3.3.8" infrastructure/database/seed_dev.py
+
+journaux:
+	@python3 scripts/deployment/journaux.py $(ARGS)
+
+admin-create:
+	$(COMPOSE) exec -e ADMIN_USERNAME -e ADMIN_EMAIL -e ADMIN_PW baolsec-api python /app/service/seed_admin.py
 
 db-psql:
 	$(COMPOSE) exec postgresql psql -U postgres -d baolsec

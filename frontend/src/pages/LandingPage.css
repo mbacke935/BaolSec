@@ -1,0 +1,143 @@
+/* Page d'accueil publique. Jetons (couleurs, polices) définis dans styles/app.css.
+   Aucune animation conditionnée par JavaScript : tout le contenu est visible dès le chargement. */
+.lp { min-height: 100vh; background: var(--bg); color: var(--text); font-size: 16px; }
+.lp-wrap { width: 100%; max-width: 1200px; margin: 0 auto; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); }
+.lp-kicker { font-size: 12.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+.lp .btn.lg { height: 48px; padding: 0 22px; font-size: 15px; border-radius: 12px; }
+
+/* Barre de navigation */
+.lp-nav { position: sticky; top: 0; z-index: 30; background: rgba(6, 11, 22, 0.78); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+.lp-nav__in { display: flex; align-items: center; gap: 24px; height: 68px; }
+.lp-brand { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-head); font-weight: 700; font-size: 20px; }
+.lp-brand img { width: 34px; height: 34px; border-radius: 9px; background: #f4f3ee; padding: 3px; }
+.lp-brand b { color: var(--accent); font-weight: 700; }
+.lp-brand.small { font-size: 16px; }
+.lp-brand.small img { width: 26px; height: 26px; border-radius: 7px; }
+.lp-nav__links { display: flex; gap: 28px; margin-left: auto; font-size: 14.5px; color: var(--text-2); }
+.lp-nav__links a:hover { color: var(--text); }
+
+/* En-tête */
+.lp-hero { position: relative; padding: 112px 0 96px; overflow: hidden;
+  background: linear-gradient(90deg, rgba(6, 11, 22, 0.97) 0%, rgba(6, 11, 22, 0.82) 48%, rgba(6, 11, 22, 0.45) 100%),
+    linear-gradient(0deg, var(--bg) 0%, transparent 30%), url('/assets/hero-network.webp') center right / cover no-repeat; }
+.lp-hero__in { max-width: 1200px; }
+.lp-hero h1 { max-width: 900px; font-family: var(--font-head); font-size: clamp(32px, 4.4vw, 52px); font-weight: 800; line-height: 1.06; letter-spacing: -0.025em; text-wrap: balance; }
+.lp-hero h1 span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lp-lead { max-width: 620px; margin-top: 24px; font-size: 18px; line-height: 1.6; color: var(--text-2); }
+.lp-hero__cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+.lp-hero__facts { list-style: none; padding: 0; margin: 48px 0 0; display: flex; flex-wrap: wrap; gap: 12px 28px; color: var(--text-2); font-size: 14.5px; }
+.lp-hero__facts li { display: inline-flex; align-items: center; gap: 9px; }
+.lp-hero__facts svg { color: var(--accent); }
+
+/* Sections */
+.lp-section { padding: 96px 0; }
+.lp-section--alt { background: linear-gradient(180deg, var(--bg-elev), var(--bg)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.lp-head { max-width: 720px; margin-bottom: 48px; }
+.lp-head h2, .lp-split__text h2, .lp-cta h2 { font-family: var(--font-head); font-size: clamp(26px, 3.4vw, 38px); font-weight: 700; line-height: 1.15; letter-spacing: -0.015em; text-wrap: balance; }
+.lp-head p:not(.lp-kicker), .lp-split__text > p:not(.lp-kicker) { margin-top: 16px; color: var(--text-2); font-size: 16.5px; line-height: 1.65; }
+
+/* Chaîne de traitement */
+.lp-pipeline { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; counter-reset: s; }
+.lp-pipeline li { position: relative; padding: 24px 20px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); }
+.lp-pipeline li:not(:last-child)::after { content: ''; position: absolute; top: 38px; right: -13px; width: 10px; height: 2px; background: var(--accent); opacity: 0.6; }
+.lp-pipeline__n { font-family: var(--font-mono); font-size: 13px; color: var(--accent); }
+.lp-pipeline h3 { margin-top: 10px; font-size: 17px; font-weight: 600; }
+.lp-pipeline p { margin-top: 10px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+/* Fonctions */
+.lp-features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.lp-feature { padding: 26px 24px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); transition: border-color 0.15s, transform 0.15s; }
+.lp-feature:hover { border-color: var(--line-2); transform: translateY(-2px); }
+.lp-feature__ico { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 11px; background: var(--accent-soft); color: var(--accent); }
+.lp-feature__ico svg { width: 21px; height: 21px; }
+.lp-feature h3 { margin-top: 18px; font-size: 17px; font-weight: 600; }
+.lp-feature p { margin-top: 8px; font-size: 14.5px; line-height: 1.6; color: var(--text-2); }
+
+/* Blocs texte + image */
+.lp-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+.lp-split__img { min-height: 380px; border-radius: 20px; border: 1px solid var(--line); background: center / cover no-repeat; box-shadow: var(--shadow); }
+.lp-checks { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 12px; }
+.lp-checks li { position: relative; padding-left: 30px; color: var(--text); }
+.lp-checks li::before { content: ''; position: absolute; left: 0; top: 4px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(20, 214, 168, 0.5); }
+.lp-checks li::after { content: ''; position: absolute; left: 6px; top: 8px; width: 6px; height: 9px; border: solid var(--accent); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.lp-sec { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 20px; }
+.lp-sec li { display: flex; gap: 14px; align-items: flex-start; }
+.lp-sec svg { flex: none; width: 22px; height: 22px; margin-top: 2px; color: var(--accent); }
+.lp-sec strong { display: block; font-weight: 600; }
+.lp-sec span { display: block; margin-top: 3px; color: var(--text-2); font-size: 14.5px; line-height: 1.55; }
+
+/* Rôles */
+.lp-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.lp-role { padding: 28px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); }
+.lp-role__head { display: flex; align-items: center; gap: 12px; }
+.lp-role__head svg { width: 24px; height: 24px; color: var(--accent); }
+.lp-role h3 { font-family: var(--font-head); font-size: 21px; font-weight: 700; }
+.lp-role ul { margin: 18px 0 0; padding-left: 20px; display: grid; gap: 9px; color: var(--text-2); font-size: 15px; }
+
+/* Appel final et pied de page */
+.lp-cta { padding: 88px 0; background: linear-gradient(180deg, rgba(6, 11, 22, 0.86), rgba(6, 11, 22, 0.94)), url('/assets/mesh.webp') center / cover no-repeat; border-top: 1px solid var(--line); }
+.lp-cta__in { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.lp-cta p { color: var(--text-2); margin-bottom: 10px; }
+.lp-foot { border-top: 1px solid var(--line); padding: 26px 0; color: var(--text-3); font-size: 13.5px; }
+.lp-foot__in { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; align-items: center; }
+
+@media (max-width: 1040px) {
+  .lp-pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-pipeline li::after { display: none; }
+  .lp-features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lp-split { grid-template-columns: 1fr; gap: 32px; }
+  .lp-split--rev .lp-split__img { order: -1; }
+  .lp-split__img { min-height: 260px; }
+}
+@media (max-width: 720px) {
+  .lp-nav__links { display: none; }
+  .lp-nav__in .btn { margin-left: auto; }
+  .lp-hero { padding: 72px 0 64px; }
+  .lp-section { padding: 64px 0; }
+  .lp-pipeline, .lp-features, .lp-roles { grid-template-columns: 1fr; }
+}
+
+/* =====================================================================
+   Mouvement de la page d'accueil (neutralisé par « réduire les animations »).
+   L'apparition au défilement utilise les animations liées au défilement du navigateur
+   (animation-timeline) : sans prise en charge, le contenu est simplement affiché.
+   ===================================================================== */
+@keyframes lpDrift { from { transform: scale(1.04) translate(0, 0); } to { transform: scale(1.1) translate(-2%, -1.5%); } }
+@keyframes lpUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+/* Fond : l'image passe dans un pseudo-élément qui dérive lentement, sous les dégradés. */
+.lp-hero { isolation: isolate; background: var(--bg); }
+.lp-hero::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(90deg, rgba(6, 11, 22, 0.97) 0%, rgba(6, 11, 22, 0.82) 48%, rgba(6, 11, 22, 0.45) 100%),
+    linear-gradient(0deg, var(--bg) 0%, transparent 30%); }
+.lp-hero::before { content: ''; position: absolute; inset: 0; z-index: -2; background: url('/assets/hero-network.webp') center right / cover no-repeat;
+  transform-origin: 70% 50%; animation: lpDrift 40s ease-in-out infinite alternate; }
+.lp-hero__in > * { animation: lpUp 0.7s var(--ease) both; }
+.lp-hero__in > :nth-child(2) { animation-delay: 0.08s; } .lp-hero__in > :nth-child(3) { animation-delay: 0.18s; }
+.lp-hero__in > :nth-child(4) { animation-delay: 0.28s; } .lp-hero__in > :nth-child(5) { animation-delay: 0.38s; }
+.lp-hero h1 span { background-size: 200% 100%; animation: lpShine 6s ease-in-out 1s infinite alternate; }
+@keyframes lpShine { from { background-position: 0% 0; } to { background-position: 100% 0; } }
+.lp-nav { transition: background 0.3s ease, box-shadow 0.3s ease; }
+.lp-nav__links a { position: relative; transition: color 0.15s ease; }
+.lp-nav__links a::after { content: ''; position: absolute; left: 0; right: 0; bottom: -6px; height: 2px; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 0.25s var(--ease); }
+.lp-nav__links a:hover::after { transform: scaleX(1); }
+.lp-pipeline li { transition: transform 0.25s var(--ease), border-color 0.25s ease; }
+.lp-pipeline li:hover { transform: translateY(-4px); border-color: rgba(20, 214, 168, 0.4); }
+.lp-feature__ico { transition: transform 0.3s var(--ease), background 0.3s ease; }
+.lp-feature:hover .lp-feature__ico { transform: scale(1.08) rotate(-4deg); background: rgba(20, 214, 168, 0.2); }
+.lp-role { transition: transform 0.25s var(--ease), border-color 0.25s ease; }
+.lp-role:hover { transform: translateY(-3px); border-color: var(--line-2); }
+.lp-split__img { transition: transform 0.6s var(--ease); }
+.lp-split:hover .lp-split__img { transform: scale(1.015); }
+html { scroll-behavior: smooth; }
+
+@supports (animation-timeline: view()) {
+  .lp-head, .lp-pipeline li, .lp-feature, .lp-role, .lp-split__text, .lp-split__img, .lp-cta__in {
+    animation: lpUp linear both; animation-timeline: view(); animation-range: entry 0% entry 40%;
+  }
+  .lp-pipeline li:nth-child(2), .lp-feature:nth-child(2), .lp-role:nth-child(2) { animation-range: entry 5% entry 45%; }
+  .lp-pipeline li:nth-child(3), .lp-feature:nth-child(3) { animation-range: entry 10% entry 50%; }
+  .lp-pipeline li:nth-child(4) { animation-range: entry 15% entry 55%; }
+  .lp-pipeline li:nth-child(5) { animation-range: entry 20% entry 60%; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

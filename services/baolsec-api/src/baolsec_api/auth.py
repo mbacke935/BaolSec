@@ -17,6 +17,7 @@ Fonctions :
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -32,18 +33,60 @@ _algorithm: str = "HS256"
 _access_expire_minutes: int = 15
 _refresh_expire_minutes: int = 480
 
+# Verrouillage temporaire après des échecs répétés (ES-01) ; valeurs posées par configure().
+max_failed_attempts: int = 5
+lockout_minutes: int = 15
+
+# ── Blocklist de tokens révoqués ──────────────────────────────────────────────
+# Structure : { jti: exp_timestamp }
+# Nettoyage automatique des entrées expirées à chaque révocation.
+# Note : en mémoire — perdu au redémarrage du processus.
+# Pour une production robuste, remplacer par une entrée Redis :
+#   SETEX jti (exp - now) "1"   +   GET jti dans _decode()
+_revoked: dict[str, int] = {}
+
+
+def _cleanup_revoked() -> None:
+    """Supprime les jti dont l'expiration est dépassée (nettoyage passif)."""
+    now = int(time.time())
+    expired = [jti for jti, exp in _revoked.items() if exp <= now]
+    for jti in expired:
+        del _revoked[jti]
+
+
+def revoke_token(jti: str, exp: int) -> None:
+    """Révoque un jti jusqu'à son expiration naturelle."""
+    _cleanup_revoked()
+    _revoked[jti] = exp
+
+
+def is_revoked(jti: str) -> bool:
+    """Retourne True si le jti est dans la blocklist et non encore expiré."""
+    exp = _revoked.get(jti)
+    if exp is None:
+        return False
+    if int(time.time()) >= exp:
+        del _revoked[jti]
+        return False
+    return True
+
 
 def configure(
     secret: str,
     algorithm: str = "HS256",
     expire_minutes: int = 15,
     refresh_expire_minutes: int = 480,
+    failed_attempts: int = 5,
+    lockout_mins: int = 15,
 ) -> None:
     global _secret, _algorithm, _access_expire_minutes, _refresh_expire_minutes
+    global max_failed_attempts, lockout_minutes
     _secret = secret
     _algorithm = algorithm
     _access_expire_minutes = expire_minutes
     _refresh_expire_minutes = refresh_expire_minutes
+    max_failed_attempts = failed_attempts
+    lockout_minutes = lockout_mins
 
 
 def _encode(user_id: str, email: str, role: UserRole, token_type: str, ttl_minutes: int) -> str:
@@ -54,6 +97,8 @@ def _encode(user_id: str, email: str, role: UserRole, token_type: str, ttl_minut
         "role": role.value,
         "type": token_type,
         "exp": exp,
+        # jti (JWT ID) unique par token — utilisé par la blocklist de révocation.
+        "jti": str(uuid.uuid4()),
     }
     return jwt.encode(payload, _secret, algorithm=_algorithm)
 
@@ -74,6 +119,10 @@ def _decode(token: str, expected_type: str) -> Optional[TokenPayload]:
         # Rejette un jeton du mauvais type (ex. refresh utilisé comme accès).
         if raw.get("type", "access") != expected_type:
             return None
+        # Rejette un jeton révoqué (logout, rotation forcée).
+        jti = raw.get("jti", "")
+        if jti and is_revoked(jti):
+            return None
         return TokenPayload(
             sub=raw["sub"],
             email=raw["email"],
@@ -92,6 +141,25 @@ def decode_token(token: str) -> Optional[TokenPayload]:
 def decode_refresh_token(token: str) -> Optional[TokenPayload]:
     """Valide un jeton de renouvellement."""
     return _decode(token, "refresh")
+
+
+def revoke_token_str(token: str, expected_type: str) -> bool:
+    """Tente de révoquer un jeton (accès ou renouvellement) à partir de sa valeur brute.
+
+    Retourne True si le jeton a été révoqué, False s'il était invalide ou déjà expiré.
+    Ne lève aucune exception.
+    """
+    try:
+        raw = jwt.decode(token, _secret, algorithms=[_algorithm])
+        if raw.get("type", "access") != expected_type:
+            return False
+        jti = raw.get("jti", "")
+        if not jti:
+            return False
+        revoke_token(jti, raw["exp"])
+        return True
+    except (JWTError, KeyError, ValueError):
+        return False
 
 
 def access_ttl_seconds() -> int:

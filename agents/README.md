@@ -138,10 +138,82 @@ supprime les morceaux les plus anciens.
 - **Vérification** : test accéléré (le volume de 72 heures injecté à débit élevé pendant une
   coupure) avec comptage avant/après, prévu avec les mesures de C27.
 
+## TLS
+
+Tous les agents chiffrent leur envoi vers la passerelle (`tls: on`, `tls.verify: on`,
+`tls.ca_file: ${BAOLSEC_CA_FILE}` dans `common/gateway-output.yaml`) : l'agent vérifie le
+certificat serveur de la passerelle contre l'AC indiquée par `BAOLSEC_CA_FILE`
+(`sources-ca.crt`, à copier sur chaque machine qui héberge un agent ou le collecteur).
+L'authentification de la source se fait par le jeton (`Authorization: Bearer
+${BAOLSEC_SOURCE_TOKEN}`), pas par un certificat client HTTPS.
+
+Le chemin Syslog TLS (port 6514, pour les équipements qui savent faire du Syslog TLS
+avec certificat client — différent du collecteur pfSense ci-dessus qui reçoit en clair
+sur le réseau local) utilise lui une authentification par **certificat client**, dont
+l'empreinte SHA-256 identifie la source côté passerelle (`cert_fingerprint`) : ce chemin
+ne concerne pas pfSense (UDP de base, voir plus haut) et demande un certificat et une clé
+par équipement, délivrés par l'AC des sources.
+
+## Rotation des identifiants (voir aussi C26, A-03)
+
+Le token d'une source se renouvelle en deux temps, pour ne jamais perdre les lots
+envoyés entre le changement côté passerelle et la reconfiguration de l'agent :
+
+1. `POST /sources/{id}/credentials/rotate` (API BaolSec) crée un **nouveau** jeton
+   `bsk_...` sans révoquer l'ancien — les deux sont valides en parallèle.
+2. Mettre à jour `BAOLSEC_SOURCE_TOKEN` dans `agent.env` sur la machine de la source,
+   puis recharger le service (`systemctl restart fluent-bit`, ou relancer le conteneur
+   du collecteur pfSense).
+3. Vérifier que l'agent envoie bien avec le nouveau jeton (voir Dépannage ci-dessous :
+   un code 401 persistant signale un jeton non reconfiguré ou déjà révoqué).
+4. Une fois la transition confirmée, révoquer explicitement l'ancien jeton :
+   `DELETE /sources/{id}/credentials/{credential_id}`.
+
+Un jeton révoqué fait abandonner le lot en cours par l'agent (401, sans réessai) : ne
+jamais révoquer l'ancien jeton avant d'avoir confirmé que l'agent utilise le nouveau.
+
+## Désinstallation
+
+**Agent Linux/Windows (service système) :**
+
+```bash
+sudo systemctl stop fluent-bit
+sudo systemctl disable fluent-bit
+sudo rm -rf /etc/baolsec-agent /var/lib/baolsec-agent      # Linux
+# Windows : équivalent avec le service Fluent Bit et C:\ProgramData\BaolSec\agent\
+```
+
+**Collecteur Syslog (conteneur) :**
+
+```bash
+docker rm -f baolsec-syslog-collector
+docker volume rm baolsec-collector-state     # supprime aussi les positions de lecture et le tampon
+```
+
+Avant de désinstaller, s'assurer que le tampon disque est vide (aucun lot en attente
+d'envoi) pour ne pas perdre d'événements non encore transmis — sinon, laisser le
+service tourner jusqu'à ce que son tampon se vide, ou le copier ailleurs avant
+suppression si les événements en attente doivent être conservés manuellement.
+
+Côté API, révoquer le ou les credentials de la source (`DELETE
+/sources/{id}/credentials/{credential_id}`) une fois l'agent arrêté, pour qu'un jeton
+qui traînerait sur la machine désinstallée ne reste pas valide.
+
+## Dépannage
+
+| Symptôme | Causes probables | Vérifications |
+|---|---|---|
+| 401 persistant | Jeton non configuré, mal copié, ou révoqué côté API | `echo $BAOLSEC_SOURCE_TOKEN` (ne pas le journaliser ailleurs) ; vérifier côté API que le credential n'est pas `revoked_at` |
+| Connexion TLS refusée | AC incorrecte (`BAOLSEC_CA_FILE`), horloge de la machine désynchronisée, certificat de la passerelle expiré | `openssl s_client -connect $BAOLSEC_GATEWAY_HOST:$BAOLSEC_GATEWAY_PORT -CAfile $BAOLSEC_CA_FILE` |
+| Événements non reçus côté BaolSec alors que l'agent tourne | Chemin de log incorrect, droits insuffisants sur le fichier/journal, filtre pfSense mal configuré (événements non-pare-feu) | Logs de l'agent (`log_level: debug` temporairement) ; sous Linux, groupes `adm`/`systemd-journal` ; pfSense : ne cocher que les événements du pare-feu |
+| Tampon qui grossit sans se vider | Passerelle ou broker indisponible, jeton révoqué (401 → abandon silencieux du lot, pas une accumulation), réseau coupé | Logs agent (codes HTTP reçus) ; `du -sh $BAOLSEC_STATE_DIR` ; métriques de la passerelle |
+| Doublons visibles côté recherche/alertes | Comportement normal et attendu en cas de renvoi après coupure — l'identifiant d'événement (event_id) assure la déduplication en aval, ce n'est pas un défaut agent | Vérifier que l'event_id est bien identique entre les deux occurrences (C26, A-04) |
+| `make agents-check` indisponible | Pas de démon Docker actif dans l'environnement courant (cf. C26, A-09) | Exécuter sur une machine avec Docker, ou valider manuellement la syntaxe YAML des configs |
+
 ## Tests
 
 ```bash
 make agents-up       # broker, passerelle, agent de test et collecteur Syslog (profil agents-test)
 make test-agents     # coupure réseau puis reconnexion, comptage avant/après
-make agents-check    # vérifie la syntaxe de toutes les configurations Fluent Bit
+make agents-check    # vérifie la syntaxe de toutes les configurations Fluent Bit (nécessite Docker, voir C26 A-09)
 ```

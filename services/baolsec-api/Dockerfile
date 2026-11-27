@@ -12,6 +12,9 @@ RUN pip install --no-cache-dir uv==0.7.3
 COPY shared/python-common /app/shared/python-common
 RUN uv pip install --system --no-cache /app/shared/python-common
 
+# Contrat rule/v1 : validation des règles avant enregistrement (EF-05)
+COPY shared/contracts /opt/baolsec/contracts
+
 COPY services/baolsec-api /app/service
 RUN uv pip install --system --no-cache /app/service
 

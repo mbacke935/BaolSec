@@ -23,7 +23,21 @@ write_agent_env() {
   chmod 644 agent-test.env collector.env   # lus par les conteneurs de test ; jetons de développement uniquement
 }
 
+# Certificat HTTPS de l'interface (ES-04 : navigateur → API chiffré), signé par l'AC de développement.
+# Généré aussi sur un environnement déjà initialisé (ajout C26), sans toucher au reste.
+frontend_cert() {
+  openssl req -newkey rsa:2048 -nodes -subj "/O=BaolSec dev/CN=localhost" -keyout frontend.key -out frontend.csr 2>/dev/null
+  openssl x509 -req -in frontend.csr -CA sources-ca.crt -CAkey sources-ca.key -CAcreateserial -days "$DAYS" \
+    -out frontend.crt -extfile <(printf '%s\n' "subjectAltName=DNS:localhost,DNS:frontend,IP:127.0.0.1" \
+      "extendedKeyUsage=serverAuth" "basicConstraints=critical,CA:FALSE" \
+      "keyUsage=critical,digitalSignature,keyEncipherment") 2>/dev/null
+  rm -f frontend.csr
+  chmod 644 frontend.crt frontend.key   # lus par le conteneur nginx ; certificat de développement uniquement
+  echo "certificat HTTPS de l'interface écrit (frontend.crt)"
+}
+
 if [[ -f sources-ca.crt && "${1:-}" != "--force" ]]; then
+  [[ -f frontend.crt ]] || frontend_cert
   if ! grep -q '^DEV_TOKEN_PFSENSE=' tokens.env 2>/dev/null; then
     echo "Fichier tokens.env incomplet (DEV_TOKEN_PFSENSE absent) : relancer avec --force pour le régénérer."
     exit 1
@@ -96,3 +110,5 @@ chmod 666 sources.json   # les tests de révocation le modifient
 chmod 600 tokens.env
 write_agent_env
 echo "Environnement de développement prêt dans $DIR"
+
+frontend_cert

@@ -15,6 +15,7 @@ from .. import metrics
 SUBJECT = "raw-events"
 DLQ_SUBJECT = "dlq.ingestion-gateway"
 MAX_DLQ_PAYLOAD = 131072      # dlq_message/v1 : payload.maxLength
+PUBLISH_CHUNK_SIZE = 500      # borne le nombre de tâches/coroutines en vol pour un même lot (A-05)
 
 
 @dataclass
@@ -75,12 +76,47 @@ class RawEventPublisher:
 
         Si une seule publication échoue, BrokerUnavailable est levée : l'émetteur renvoie le
         lot entier, et ce qui a déjà été stocké est écarté comme doublon (mêmes identifiants).
+
+        Publié par blocs bornés (``PUBLISH_CHUNK_SIZE``) plutôt qu'en une seule volée de tâches :
+        avec un lot au plafond (50 000 événements, cf. ``max_events_per_batch``), créer toutes
+        les tâches d'un coup a un coût mémoire non négligeable sur le poste de développement
+        (8 Gio) ; le sémaphore ``self._sem`` borne déjà les appels broker concurrents mais pas
+        la création des objets tâche eux-mêmes.
+
+        ATTENTION — ceci n'introduit AUCUNE atomicité qui n'existait pas déjà, et n'en retire
+        aucune non plus : une erreur sur un bloc interrompt les blocs suivants (ils ne sont
+        jamais tentés), mais les événements des blocs déjà traités avec succès restent publiés
+        dans le broker — rien n'est « annulé ». Ce n'était pas différent avant (``asyncio.gather``
+        sur l'ensemble du lot laissait déjà des publications déjà abouties quand une seule
+        échouait au milieu). Ce qui rend un nouvel envoi du lot entier sûr après une erreur
+        n'est pas une transaction, mais l'idempotence : Msg-Id = event_id pour les événements et
+        Msg-Id = sha256(source_id|contenu) pour les rejets, tous deux déterministes, donc un
+        re-publish est reconnu comme doublon par le broker. Vu de l'émetteur (agent), le lot
+        reste bien tout-ou-rien : soit 202 avec un résultat durable pour chaque événement, soit
+        503 et renvoi du lot complet (cf. http/__init__.py) — c'est cette garantie de contrat
+        qui est préservée, pas une atomicité d'écriture côté broker.
         """
-        tasks = [self.publish_one(e) for e in events] + [self.reject(*r) for r in rejections]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        errors = [r for r in results if isinstance(r, BaseException)]
-        if errors:
-            first = errors[0]
-            raise first if isinstance(first, BrokerUnavailable) else BrokerUnavailable(str(first))
-        dup = sum(1 for r in results[:len(events)] if r is True)
-        return PublishSummary(stored=len(events) - dup, duplicates=dup)
+        dup = 0
+        stored = 0
+
+        async def run_chunk(coros: list) -> None:
+            nonlocal dup, stored
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            errors = [r for r in results if isinstance(r, BaseException)]
+            if errors:
+                first = errors[0]
+                raise first if isinstance(first, BrokerUnavailable) else BrokerUnavailable(str(first))
+            return results
+
+        event_chunks = [events[i:i + PUBLISH_CHUNK_SIZE] for i in range(0, len(events), PUBLISH_CHUNK_SIZE)]
+        for chunk in event_chunks:
+            results = await run_chunk([self.publish_one(e) for e in chunk])
+            dup += sum(1 for r in results if r is True)
+            stored += len(chunk)
+        stored -= dup
+
+        rejection_chunks = [rejections[i:i + PUBLISH_CHUNK_SIZE] for i in range(0, len(rejections), PUBLISH_CHUNK_SIZE)]
+        for chunk in rejection_chunks:
+            await run_chunk([self.reject(*r) for r in chunk])
+
+        return PublishSummary(stored=stored, duplicates=dup)

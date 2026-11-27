@@ -1,5 +1,7 @@
-# Docker Compose BaolSec — les services sont ajoutés au fil de la réalisation.
-# Lancer depuis la racine du dépôt : docker compose -f infrastructure/compose/compose.yaml up -d
+# Docker Compose BaolSec — pile applicative complète (C18).
+# Depuis la racine du dépôt : docker compose up -d   (compose.yaml racine inclut ce fichier et ajoute
+# Prometheus et Grafana), ou directement : docker compose -f infrastructure/compose/compose.yaml up -d
+# Prérequis : .env rempli (voir .env.example) et make gateway-dev (certificats de développement).
 
 name: baolsec
 
@@ -89,8 +91,11 @@ services:
       plugins.security.ssl.http.pemkey_filepath: esnode-key.pem
       plugins.security.ssl.http.pemtrustedcas_filepath: root-ca.pem
       DISABLE_INSTALL_DEMO_CONFIG: "false"
+      # Dépôt des instantanés quotidiens (ES-09, service opensearch-maintenance)
+      path.repo: /usr/share/opensearch/snapshots
     volumes:
       - opensearch-data:/usr/share/opensearch/data
+      - opensearch-snapshots:/usr/share/opensearch/snapshots
     ports:
       - "127.0.0.1:9200:9200"   # développement uniquement
     healthcheck:
@@ -253,9 +258,13 @@ services:
     environment:
       NATS_URL: nats://broker:4222
       NATS_TOKEN: ${BROKER_TOKEN}
-      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-https://opensearch:9200}
       OPENSEARCH_USER: ${OPENSEARCH_USER:-admin}
       OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-}
+      # Certificat de démonstration d'OpenSearch : chiffré mais non vérifiable sans son CA.
+      # En production : OPENSEARCH_CA_CERT=<chemin du CA monté> et OPENSEARCH_VERIFY_CERTS=true.
+      OPENSEARCH_CA_CERT: ${OPENSEARCH_CA_CERT:-}
+      OPENSEARCH_VERIFY_CERTS: ${OPENSEARCH_VERIFY_CERTS:-false}
     depends_on:
       broker-init:
         condition: service_completed_successfully
@@ -304,6 +313,15 @@ services:
       OPENSEARCH_URL: https://opensearch:9200
       OPENSEARCH_USER: ${OPENSEARCH_USER:-admin}
       OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD}
+      # Sans ces deux variables l'API refusait de démarrer (HTTPS sans CA) : même choix que
+      # indexing-worker en développement ; en production, fournir OPENSEARCH_CA_CERT.
+      OPENSEARCH_CA_CERT: ${OPENSEARCH_CA_CERT:-}
+      OPENSEARCH_VERIFY_CERTS: ${OPENSEARCH_VERIFY_CERTS:-false}
+      # File de rejet (GET /dlq, lecture seule) et état des flux pour la page Supervision
+      BROKER_URL: nats://broker:4222
+      BROKER_TOKEN: ${BROKER_TOKEN}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost:8443,https://localhost}
+      FORWARDED_ALLOW_IPS: "*"     # en-têtes X-Forwarded-* posés par le relais nginx de l'interface
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET manquant dans .env}
       JWT_ALGORITHM: HS256
       JWT_EXPIRE_MINUTES: "15"
@@ -324,6 +342,8 @@ services:
         condition: service_healthy
       incident-builder:
         condition: service_healthy
+      broker-init:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -334,7 +354,67 @@ services:
       retries: 10
       start_period: 20s
     restart: unless-stopped
-    networks: [internal]  
+    networks:
+      internal:
+        aliases: [api]          # nom utilisé par le relais nginx de l'interface
+
+  # --- Interface web (C22, C23) : HTTPS uniquement (ES-04), relais /api vers baolsec-api ---------
+  frontend:
+    build:
+      context: ../../frontend
+    volumes:
+      - ../tls/dev/frontend.crt:/etc/nginx/certs/frontend.crt:ro   # make gateway-dev
+      - ../tls/dev/frontend.key:/etc/nginx/certs/frontend.key:ro
+    environment:
+      FRONTEND_HTTPS_PORT: ${FRONTEND_HTTPS_PORT:-443}   # cible de la redirection HTTP → HTTPS
+    ports:
+      - "${FRONTEND_HTTPS_PORT:-443}:443"
+      - "${FRONTEND_HTTP_PORT:-80}:80"       # redirige vers HTTPS
+    depends_on:
+      baolsec-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
+
+  # --- Sauvegarde quotidienne de PostgreSQL (ES-09) ----------------------------------------
+  backup:
+    image: postgres:17-alpine
+    entrypoint: ["sh", "/opt/baolsec/pg_backup.sh"]
+    environment:
+      PGHOST: postgresql
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: baolsec
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ../backup/pg_backup.sh:/opt/baolsec/pg_backup.sh:ro
+      - postgres-backups:/backups
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [internal]
+
+  # --- Instantané quotidien et rétention des index OpenSearch (ES-09) ----------------------
+  opensearch-maintenance:
+    build:
+      context: ../..
+      dockerfile: services/indexing-worker/Dockerfile
+    command: ["python", "-m", "indexing_worker.maintenance"]
+    environment:
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-https://opensearch:9200}
+      OPENSEARCH_USER: ${OPENSEARCH_USER:-admin}
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-}
+      OPENSEARCH_CA_CERT: ${OPENSEARCH_CA_CERT:-}
+      OPENSEARCH_VERIFY_CERTS: ${OPENSEARCH_VERIFY_CERTS:-false}
+      RETENTION_DAYS: ${EVENTS_RETENTION_DAYS:-90}
+      SNAPSHOT_KEEP: ${SNAPSHOT_KEEP:-14}
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [internal]
 
   # --- Collecte (C7) : services de test, démarrés avec le profil « agents-test » -------------
   agent-test:
@@ -387,6 +467,8 @@ services:
 volumes:
   broker-data:
   postgres-data:
+  postgres-backups:
+  opensearch-snapshots:
   agent-test-state:
   collector-state:
   opensearch-data:

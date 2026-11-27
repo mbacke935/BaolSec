@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from fastapi import HTTPException
 
 _url: str = "http://incident-builder:9104/commands"
 _token: str = ""
@@ -68,3 +69,21 @@ async def send_command(
             detail = resp.text
         raise CommandError(resp.status_code, detail)
     return resp.json()
+
+
+def is_uuid(value: str | None) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return value is not None
+    except ValueError:
+        return False
+
+
+def assignee_from(body: dict) -> str | None:
+    """Identifiant de l'analyste à assigner (None = désassigner), validé avant envoi."""
+    raw = body.get("assignee_id", body.get("assigned_to", body.get("user_id")))
+    if raw in (None, ""):
+        return None
+    if not is_uuid(raw):
+        raise HTTPException(status_code=422, detail="Identifiant d'analyste invalide")
+    return str(uuid.UUID(str(raw)))

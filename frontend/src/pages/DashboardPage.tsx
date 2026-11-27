@@ -1,96 +1,137 @@
-/**
- * Tableau de bord d'analyse (C23).
- * Compteurs : incidents ouverts, alertes récentes, couverture sources.
- */
-import { useQuery } from '@tanstack/react-query';
-import { alerts, coverage, incidents } from '../api/analyst';
-import type { CoverageState, Incident } from '../api/analyst';
-
-const SEVERITY_DOT: Record<string, string> = {
-  critique: '#ef4444',
-  elevee:   '#f97316',
-  moyenne:  '#eab308',
-  faible:   '#22c55e',
-};
-
-const COVERAGE_DOT: Record<string, string> = {
-  ACTIVE:         '#22c55e',
-  SILENCIEUSE:    '#eab308',
-  FLUX_INCOMPLET: '#f97316',
-  DESACTIVEE:     '#6b7280',
-  INCONNUE:       '#6b7280',
-};
-
-function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
-  return (
-    <div style={{ background: '#1e293b', borderRadius: '0.5rem', padding: '1.25rem', flex: '1', minWidth: '160px' }}>
-      <p style={{ color: '#64748b', fontSize: '0.8rem', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</p>
-      <p style={{ color: color || '#e2e8f0', fontSize: '2rem', margin: '0.25rem 0', fontWeight: 700 }}>{value}</p>
-      {sub && <p style={{ color: '#64748b', fontSize: '0.75rem', margin: 0 }}>{sub}</p>}
-    </div>
-  );
-}
+/** Tableau de bord de l'Analyste (C23) : ce qui demande une action, du plus grave au moins grave. */
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useFreshKeys } from '../lib/motion';
+import { prefetchIncident } from '../lib/prefetch';
+import { Link, useNavigate } from 'react-router-dom';
+import { alerts, coverage, incidents } from '../api/endpoints';
+import { useAuth } from '../auth/AuthContext';
+import {
+  AlertStatusBadge, Card, CoverageBadge, Empty, ErrorNotice, IncidentStateBadge, LoadingRows, PageHeader,
+  SeverityBadge, Stat,
+} from '../components/ui';
+import { IconCheck, IconRadar } from '../components/icons';
+import { ago, bySeverity } from '../lib/format';
 
 export function DashboardPage() {
-  const { data: incidentList = [] } = useQuery({ queryKey: ['incidents'], queryFn: () => incidents.list({ limit: 200 }) });
-  const { data: alertList = [] } = useQuery({ queryKey: ['alerts-recent'], queryFn: () => alerts.list({ limit: 20 }) });
-  const { data: coverageList = [] } = useQuery({ queryKey: ['coverage'], queryFn: () => coverage.list() });
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const inc = useQuery({ queryKey: ['incidents', 'active'], queryFn: () => incidents.list({ active_only: true }), refetchInterval: 30_000 });
+  const al = useQuery({ queryKey: ['alerts', 'recent'], queryFn: () => alerts.list({ limit: 50 }), refetchInterval: 30_000 });
+  const cov = useQuery({ queryKey: ['coverage'], queryFn: coverage.list, refetchInterval: 60_000 });
 
-  const openIncidents = incidentList.filter((i: Incident) => i.state === 'ouvert' || i.state === 'en_cours');
-  const criticalIncidents = openIncidents.filter((i: Incident) => i.severity === 'critique' || i.severity === 'elevee');
-  const activeSources = (coverageList as CoverageState[]).filter((c) => c.state === 'ACTIVE').length;
-  const silentSources = (coverageList as CoverageState[]).filter((c) => c.state === 'SILENCIEUSE' || c.state === 'FLUX_INCOMPLET').length;
+  const qc = useQueryClient();
+  const freshInc = useFreshKeys(inc.data?.map((i) => i.id));
+  const freshAl = useFreshKeys(al.data?.map((a) => a.id));
+  const active = [...(inc.data ?? [])].sort((a, b) => bySeverity(a, b) || b.updated_at.localeCompare(a.updated_at));
+  const newAlerts = (al.data ?? []).filter((a) => a.status === 'nouvelle');
+  const mine = active.filter((i) => i.assigned_to === user?.id);
+  const degraded = (cov.data?.items ?? []).filter((c) => c.state === 'SILENCIEUSE' || c.state === 'FLUX_INCOMPLET');
+  const severeActive = active.filter((i) => i.severity === 'critique' || i.severity === 'elevee').length;
+  const hello = new Date().getHours() < 18 ? 'Bonjour' : 'Bonsoir';
 
   return (
-    <div>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '1.5rem' }}>Tableau de bord</h1>
+    <>
+      <PageHeader title={`${hello} ${user?.username ?? ''}`}
+        subtitle="Vue d'ensemble de ce qui demande votre attention. Actualisation automatique toutes les 30 secondes." />
 
-      {/* KPIs */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
-        <StatCard label="Incidents ouverts" value={openIncidents.length} color="#f97316" />
-        <StatCard label="Critiques / Élevés" value={criticalIncidents.length} color="#ef4444" />
-        <StatCard label="Alertes récentes" value={alertList.length} sub="20 dernières" />
-        <StatCard label="Sources actives" value={activeSources} color="#22c55e" sub={silentSources > 0 ? `${silentSources} silencieuse(s)` : undefined} />
+      <div className="grid grid-4 mb-16">
+        <Stat label="Alertes nouvelles" value={al.isLoading ? '…' : newAlerts.length} tone={newAlerts.length ? 'critical' : 'ok'}
+          sub={newAlerts.length ? 'À prendre en charge' : 'Aucune alerte en attente'} href="/alerts" />
+        <Stat label="Incidents actifs" value={inc.isLoading ? '…' : active.length} tone={active.length ? 'warn' : 'ok'}
+          sub={`${active.filter((i) => i.state === 'ouvert').length} ouvert(s) · ${active.filter((i) => i.state === 'en_cours').length} en cours`} href="/incidents" />
+        <Stat label="Critiques ou élevés" value={inc.isLoading ? '…' : severeActive} tone={severeActive ? 'critical' : 'ok'}
+          sub="Incidents actifs à traiter en priorité" href="/incidents" />
+        <Stat label="Sources à surveiller" value={cov.isLoading ? '…' : degraded.length} tone={degraded.length ? 'warn' : 'ok'}
+          sub={degraded.length ? 'Silencieuses ou flux incomplet' : 'Toutes les sources actives remontent'} href="/coverage" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
-        {/* Incidents ouverts */}
-        <div>
-          <h2 style={{ fontSize: '1rem', color: '#94a3b8', marginBottom: '0.75rem' }}>Incidents ouverts</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {openIncidents.slice(0, 10).map((inc: Incident) => (
-              <a
-                key={inc.id}
-                href={`/incidents/${inc.id}`}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: '#1e293b', padding: '0.75rem', borderRadius: '0.375rem', textDecoration: 'none', color: '#e2e8f0' }}
-              >
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: SEVERITY_DOT[inc.severity] || '#6b7280', flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: '0.9rem' }}>{inc.title}</span>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{inc.state}</span>
-              </a>
-            ))}
-            {openIncidents.length === 0 && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Aucun incident ouvert</p>}
-          </div>
-        </div>
-
-        {/* Couverture sources */}
-        <div>
-          <h2 style={{ fontSize: '1rem', color: '#94a3b8', marginBottom: '0.75rem' }}>Couverture sources</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {(coverageList as CoverageState[]).map((c) => (
-              <div key={c.source_id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: '#1e293b', padding: '0.75rem', borderRadius: '0.375rem' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: COVERAGE_DOT[c.state] || '#6b7280', flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: '0.9rem' }}>{c.source_name}</span>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{c.state}</span>
-                <span style={{ fontSize: '0.75rem', color: '#475569' }}>
-                  {c.last_received_at ? new Date(c.last_received_at).toLocaleTimeString('fr-FR') : '—'}
-                </span>
+      <div className="grid grid-main">
+        <div className="stack">
+          <Card title="Incidents à traiter" hint={`${active.length} actif(s)`} actions={<Link className="btn sm" to="/incidents">Tous les incidents</Link>}>
+            {inc.error ? <div className="card-body"><ErrorNotice error={inc.error} retry={() => inc.refetch()} /></div> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Gravité</th><th>Incident</th><th>État</th><th>Responsable</th><th className="num">Alertes</th><th>Activité</th></tr></thead>
+                  {inc.isLoading ? <LoadingRows cols={6} rows={4} /> : (
+                    <tbody>
+                      {active.slice(0, 8).map((i) => (
+                        <tr key={i.id} className={`clickable ${freshInc.has(i.id) ? 'is-fresh' : ''}`} onClick={() => navigate(`/incidents/${i.id}`)} onMouseEnter={() => prefetchIncident(qc, i.id)}>
+                          <td><SeverityBadge value={i.severity} /></td>
+                          <td className="title-cell"><strong>{i.title}</strong><span>Ouvert {ago(i.opened_at)}</span></td>
+                          <td><IncidentStateBadge value={i.state} /></td>
+                          <td className={i.assigned_to_name ? '' : 'faint'}>{i.assigned_to_name ?? 'Non attribué'}</td>
+                          <td className="num">{i.alert_count}</td>
+                          <td className="faint nowrap">{ago(i.updated_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  )}
+                </table>
+                {!inc.isLoading && active.length === 0 && <Empty title="Aucun incident actif" icon={<IconCheck />}>Les nouvelles alertes corrélées apparaîtront ici.</Empty>}
               </div>
-            ))}
-            {coverageList.length === 0 && <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Aucune source</p>}
-          </div>
+            )}
+          </Card>
+
+          <Card title="Dernières alertes" actions={<Link className="btn sm" to="/alerts">Toutes les alertes</Link>}>
+            {al.error ? <div className="card-body"><ErrorNotice error={al.error} /></div> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Gravité</th><th>Règle</th><th>Statut</th><th>Incident</th><th>Déclenchée</th></tr></thead>
+                  {al.isLoading ? <LoadingRows cols={5} rows={4} /> : (
+                    <tbody>
+                      {(al.data ?? []).slice(0, 8).map((a) => (
+                        <tr key={a.id} className={`clickable ${freshAl.has(a.id) ? 'is-fresh' : ''}`} onClick={() => navigate(a.incident_id ? `/incidents/${a.incident_id}` : '/alerts')}
+                          onMouseEnter={() => { if (a.incident_id) prefetchIncident(qc, a.incident_id); }}>
+                          <td><SeverityBadge value={a.severity} /></td>
+                          <td className="title-cell"><strong>{a.title}</strong><span className="mono">{a.rule_code ?? ''}</span></td>
+                          <td><AlertStatusBadge value={a.status} /></td>
+                          <td className="truncate faint" style={{ maxWidth: 220 }}>{a.incident_title ?? '—'}</td>
+                          <td className="faint nowrap">{ago(a.fired_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  )}
+                </table>
+                {!al.isLoading && !al.data?.length && <Empty title="Aucune alerte">Les alertes produites par les règles de détection s'afficheront ici.</Empty>}
+              </div>
+            )}
+          </Card>
+        </div>
+
+        <div className="stack">
+          <Card title="Mes dossiers" hint={`${mine.length} incident(s) attribué(s)`} pad>
+            {mine.length === 0 ? <p className="muted small">Aucun incident ne vous est attribué. Ouvrez un incident et choisissez « M'attribuer ».</p> : (
+              <ul className="mini-list" style={{ margin: '-16px -20px' }}>
+                {mine.slice(0, 6).map((i) => (
+                  <li key={i.id}><Link to={`/incidents/${i.id}`} className="grow"><div className="t" style={{ fontWeight: 600 }}>{i.title}</div>
+                    <div className="small faint">{i.alert_count} alerte(s) · activité {ago(i.updated_at)}</div></Link><SeverityBadge value={i.severity} /></li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card title="Couverture des sources" actions={<Link className="btn sm" to="/coverage">Détails</Link>}>
+            {cov.error ? <div className="card-body"><ErrorNotice error={cov.error} /></div> : cov.isLoading ? <div className="card-body"><div className="skeleton" /></div> : (
+              <ul className="mini-list">
+                {[...(cov.data?.items ?? [])]
+                  .sort((a, b) => Number(b.state === 'SILENCIEUSE' || b.state === 'FLUX_INCOMPLET') - Number(a.state === 'SILENCIEUSE' || a.state === 'FLUX_INCOMPLET'))
+                  .slice(0, 8).map((c) => (
+                    <li key={c.source_id}>
+                      <div className="grow">
+                        <div style={{ fontWeight: 600 }}>{c.source_name}</div>
+                        <div className="small faint">
+                          {c.affected_rules.length ? `${c.affected_rules.length} règle(s) privée(s) de données` : c.last_received_at ? `Dernier événement ${ago(c.last_received_at)}` : 'Aucun événement reçu'}
+                        </div>
+                      </div>
+                      <CoverageBadge value={c.state} />
+                    </li>
+                  ))}
+                {!cov.data?.items.length && <Empty title="Aucune source déclarée" icon={<IconRadar />} />}
+              </ul>
+            )}
+          </Card>
         </div>
       </div>
-    </div>
+    </>
   );
 }

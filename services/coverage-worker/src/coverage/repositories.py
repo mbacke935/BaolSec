@@ -65,6 +65,7 @@ class SourceConfig:
     silence_threshold_s: int          # délai avant SILENCIEUSE (défaut 600 s)
     expected_min_events_per_h: int | None  # min événements/heure attendus (None = pas de seuil)
     active: bool
+    source_type: str | None = None    # linux | windows | firewall | http (règles affectées, EF-09)
 
 
 @dataclass(frozen=True)
@@ -84,12 +85,12 @@ class CoverageStateRow:
 async def list_sources(conn: psycopg.AsyncConnection) -> list[SourceConfig]:
     """Retourne toutes les sources actives et inactives (l'évaluateur décide)."""
     cur = await conn.execute(
-        "SELECT id, name, silence_threshold_s, expected_min_events_per_h, is_enabled AS active "
-        "FROM config.sources ORDER BY name"
+        "SELECT id, name, silence_threshold_s, expected_min_events_per_h, is_enabled AS active, "
+        "source_type::text FROM config.sources ORDER BY name"
     )
     return [
         SourceConfig(id=r[0], name=r[1], silence_threshold_s=r[2],
-                     expected_min_events_per_h=r[3], active=r[4])
+                     expected_min_events_per_h=r[3], active=r[4], source_type=r[5])
         for r in await cur.fetchall()
     ]
 
@@ -277,24 +278,65 @@ async def insert_state_history(
     )
 
 
-async def upsert_affected_rules(
+# Cause enregistrée pour un état dégradé (enum couverture.cause)
+CAUSE_OF_STATE = {"SILENCIEUSE": "silence", "FLUX_INCOMPLET": "flux_incomplet", "DESACTIVEE": "desactivee"}
+
+
+async def sync_affected_rules(
     conn: psycopg.AsyncConnection,
     *,
     source_id: uuid.UUID,
-    rule_ids: list[str],
-    evaluated_at: datetime,
-) -> None:
-    """Remplace la liste des règles affectées par l'état dégradé d'une source."""
+    source_type: str | None,
+    state: str,
+    now: datetime,
+) -> list[uuid.UUID]:
+    """Tient à jour les règles privées de données par l'état d'une source (EF-09, C4 4.4).
+
+    Règles concernées : règles actives dont une exigence (config.rule_requirements) porte sur le type
+    de la source, ou sur cette source précisément. Une ligne est ouverte (resolved_at NULL) tant que la
+    source reste dégradée pour la même cause ; elle est fermée (resolved_at) quand l'état redevient
+    normal ou que la cause change. L'historique est conservé. Retourne les règles affectées en cours.
+    """
+    cause = CAUSE_OF_STATE.get(state)
+    if cause is None or source_type is None:
+        await conn.execute(
+            "UPDATE couverture.coverage_affected_rules SET resolved_at = %s "
+            "WHERE source_id = %s AND resolved_at IS NULL",
+            (now, source_id),
+        )
+        return []
+    cur = await conn.execute(
+        """SELECT DISTINCT rr.rule_id FROM config.rule_requirements rr
+             JOIN config.rules r ON r.id = rr.rule_id
+            WHERE r.is_enabled AND rr.source_type = %s::config.source_type
+              AND (rr.source_id IS NULL OR rr.source_id = %s)""",
+        (source_type, source_id),
+    )
+    wanted = {row[0] for row in await cur.fetchall()}
+    # Fermer les lignes ouvertes d'une autre cause ou d'une règle qui ne dépend plus de la source
     await conn.execute(
-        "DELETE FROM couverture.coverage_affected_rules WHERE source_id = %s",
+        "UPDATE couverture.coverage_affected_rules SET resolved_at = %s "
+        "WHERE source_id = %s AND resolved_at IS NULL AND (cause <> %s::couverture.cause OR NOT (rule_id = ANY(%s)))",
+        (now, source_id, cause, list(wanted)),
+    )
+    cur = await conn.execute(
+        "SELECT rule_id FROM couverture.coverage_affected_rules WHERE source_id = %s AND resolved_at IS NULL",
         (source_id,),
     )
-    if rule_ids:
-        await conn.executemany(
-            "INSERT INTO couverture.coverage_affected_rules (source_id, rule_id, affected_at) "
-            "VALUES (%s, %s, %s)",
-            [(source_id, rid, evaluated_at) for rid in rule_ids],
-        )
+    open_rules = {row[0] for row in await cur.fetchall()}
+    missing = wanted - open_rules
+    if missing:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT INTO couverture.coverage_affected_rules (source_id, rule_id, since, cause) "
+                "VALUES (%s, %s, %s, %s::couverture.cause) ON CONFLICT DO NOTHING",
+                [(source_id, rid, now, cause) for rid in missing],
+            )
+    return sorted(wanted, key=str)
+
+
+# Ancien nom conservé pour compatibilité des imports
+upsert_affected_rules = sync_affected_rules
 
 
 __all__ = [
@@ -303,5 +345,5 @@ __all__ = [
     "list_sources", "get_source_by_name",
     "get_coverage_state", "upsert_coverage_state",
     "bump_received", "bump_processed",
-    "insert_state_history", "upsert_affected_rules",
+    "insert_state_history", "upsert_affected_rules", "sync_affected_rules",
 ]
