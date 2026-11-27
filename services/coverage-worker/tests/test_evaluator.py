@@ -344,3 +344,37 @@ async def test_evaluateur_pas_de_transition_si_etat_identique(monkeypatch, sourc
     await evaluator._evaluate_all()
 
     assert history_calls == []
+
+
+# ------------------------------------------------------------------ normalisation à l'arrêt (EF-09, audit 26/11/2026)
+
+def test_normalisation_arretee_donne_flux_incomplet_pas_silencieuse():
+    """Les événements bruts arrivent encore mais plus rien n'est traité depuis plus que le seuil :
+    FLUX_INCOMPLET, même avec un long historique de compteurs sains (99 % traités)."""
+    from datetime import timedelta
+    state, reason = evaluate_state(
+        active=True, last_received_at=NOW - timedelta(seconds=10), received_count=10_000,
+        normalized_count=9_900, silence_threshold_s=SILENCE_S, now=NOW,
+        last_processed_at=NOW - timedelta(seconds=SILENCE_S + 120),
+    )
+    assert state == "FLUX_INCOMPLET"
+    assert "non traités" in reason
+
+
+def test_leger_retard_de_traitement_reste_active():
+    from datetime import timedelta
+    state, _ = evaluate_state(
+        active=True, last_received_at=NOW - timedelta(seconds=5), received_count=100, normalized_count=100,
+        silence_threshold_s=SILENCE_S, now=NOW, last_processed_at=NOW - timedelta(seconds=30),
+    )
+    assert state == "ACTIVE"
+
+
+def test_agent_arrete_reste_silencieuse_et_non_flux_incomplet():
+    from datetime import timedelta
+    old = NOW - timedelta(seconds=SILENCE_S + 60)
+    state, _ = evaluate_state(
+        active=True, last_received_at=old, received_count=100, normalized_count=100,
+        silence_threshold_s=SILENCE_S, now=NOW, last_processed_at=old,
+    )
+    assert state == "SILENCIEUSE"

@@ -143,3 +143,44 @@ async def test_referentiel_indisponible_503(make_client, cache):
     async with make_client() as c:
         r = await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
     assert r.status_code == 503
+
+
+async def test_source_revoquee_rejetee_sans_redemarrage_de_la_gateway(make_client, cache, broker):
+    """A-06 : contrairement à Syslog (connexion TLS persistante), HTTP se réauthentifie à
+    chaque requête (`cache.by_token_hash` est relu par `create_app`'s `/ingest` à chaque appel) :
+    une source doit donc être rejetée dès que le cache reflète sa révocation, sans qu'il soit
+    besoin de redémarrer la Gateway ni de rouvrir quoi que ce soit côté agent. On simule ici
+    l'état du cache après un rafraîchissement qui aurait vu la révocation (plutôt que de
+    réécrire le fichier sources.json et attendre un vrai refresh, le fixture `cache` ne
+    l'exposant pas) : la 1re requête passe, puis on retire l'entrée comme le ferait un
+    `refresh()` réel après révocation, et la 2e requête avec le même jeton doit être refusée."""
+    async with make_client() as c:
+        r1 = await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
+    assert r1.status_code == 202
+
+    # Effet d'un refresh() réel après révocation du credential LINUX_TOKEN côté référentiel.
+    from gateway.auth import hash_token
+    cache._by_token_hash.pop(hash_token(LINUX_TOKEN), None)
+
+    async with make_client() as c:
+        r2 = await c.post("/ingest", json=BATCH, headers=auth(LINUX_TOKEN))
+    assert r2.status_code == 401
+    assert len(broker.on("raw-events")) == 3, "aucun nouvel événement ne doit être publié après révocation"
+
+
+async def test_lot_volumineux_publie_par_blocs(make_client, broker):
+    """A-05 : un lot dépassant PUBLISH_CHUNK_SIZE (500) est publié par blocs bornés, pas en
+    une seule volée de tâches ; le résultat (stocké/rejeté) reste identique à une publication
+    en un seul bloc, et rien n'est perdu ni dupliqué aux frontières des blocs (1200 événements,
+    soit 2 blocs pleins + 1 partiel)."""
+    n = 1200
+    records = [{"log": f"<38>Nov  5 10:{i // 60:02d}:{i % 60:02d} srv sshd[1]: evt {i}"} for i in range(n)]
+    records += [{"log": 1000 + i} for i in range(7)]         # rejets distincts (log non textuel), frontière du dernier bloc
+    async with make_client(max_events_per_batch=n + 10, max_body_bytes=2_000_000) as c:
+        r = await c.post("/ingest", json=records, headers=auth(LINUX_TOKEN))
+    assert r.status_code == 202
+    body = r.json()
+    assert body["stored"] == n and len(body["rejected"]) == 7
+    assert len(broker.on("raw-events")) == n
+    assert len(broker.on("dlq.ingestion-gateway")) == 7
+    assert len({e["event_id"] for e in broker.on("raw-events")}) == n   # aucun doublon aux frontières

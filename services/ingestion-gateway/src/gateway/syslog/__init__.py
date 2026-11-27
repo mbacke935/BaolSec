@@ -31,7 +31,19 @@ MAX_LENGTH_DIGITS = 10
 
 
 class FrameTooLong(Exception):
-    pass
+    """Levée après consommation d'une trame trop grande.
+
+    Le contenu réel n'est délibérément pas conservé par cette exception : le
+    draine sans tampon pour ne pas exposer la passerelle à une consommation
+    mémoire non bornée sur un en-tête de longueur hostile. ``length`` donne la
+    taille déclarée (comptage d'octets) ou observée (découpage par ligne)
+    lorsqu'elle est connue, pour que l'appelant puisse au moins tracer le rejet.
+    """
+
+    def __init__(self, reason: str, length: int | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.length = length
 
 
 async def read_frame(reader: asyncio.StreamReader, max_bytes: int) -> bytes | None:
@@ -56,25 +68,27 @@ async def read_frame(reader: asyncio.StreamReader, max_bytes: int) -> bytes | No
                 if not chunk:
                     raise asyncio.IncompleteReadError(b"", remaining)
                 remaining -= len(chunk)
-            raise FrameTooLong(length)
+            raise FrameTooLong("comptage_octets", length)
         return await reader.readexactly(length)
     line = first                                         # découpage par fin de ligne
     try:
         line += await reader.readuntil(b"\n")
     except asyncio.IncompleteReadError as exc:           # fin de connexion sans fin de ligne
         line += exc.partial
-    except asyncio.LimitOverrunError:                    # ligne plus longue que le tampon : on la jette
+    except asyncio.LimitOverrunError as exc:             # ligne plus longue que le tampon : on la jette
+        observed = exc.consumed
         while True:
             try:
                 await reader.readuntil(b"\n")
                 break
-            except asyncio.LimitOverrunError as exc:
-                await reader.readexactly(exc.consumed)
+            except asyncio.LimitOverrunError as exc2:
+                await reader.readexactly(exc2.consumed)
+                observed += exc2.consumed
             except asyncio.IncompleteReadError:
                 break
-        raise FrameTooLong("ligne")
+        raise FrameTooLong("ligne", observed)
     if len(line) > max_bytes:
-        raise FrameTooLong(len(line))
+        raise FrameTooLong("ligne", len(line))
     return line.rstrip(b"\r\n")
 
 
@@ -115,11 +129,12 @@ class SyslogServer:
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 10.0)
 
-    async def _reject_until_stored(self, source: Source, text: str) -> None:
+    async def _reject_until_stored(self, source: Source, text: str, reason: str | None = None) -> None:
         delay = 0.5
+        reason = reason or f"message Syslog trop long ({len(text)} caractères)"
         while True:
             try:
-                await self._publisher.reject(source.id, text, f"message Syslog trop long ({len(text)} caractères)")
+                await self._publisher.reject(source.id, text, reason)
                 return
             except BrokerUnavailable:
                 await asyncio.sleep(delay)
@@ -147,7 +162,25 @@ class SyslogServer:
                 except FrameTooLong as exc:
                     metrics.EVENTS.labels(source.id, T, "rejected").inc()
                     metrics.REJECTIONS.labels(T, "too_large").inc()
-                    log.warning("message Syslog trop long (%s octets) de %s ignoré", exc, source.name)
+                    log.warning(
+                        "message Syslog trop long (%s, %s octets) de %s : rejeté en DLQ, contenu non conservé",
+                        exc.reason, exc.length, source.name,
+                    )
+                    # Le contenu n'a jamais été tamponné (protection mémoire contre un en-tête de
+                    # longueur hostile) : la DLQ reçoit un repère borné, pas le texte d'origine.
+                    # Le motif (reason) rapporte la taille réelle de la trame rejetée (exc.length),
+                    # pas la taille de ce repère, pour rester informatif en analyse.
+                    declared_or_observed = exc.length if exc.length is not None else "inconnue"
+                    placeholder = (
+                        f"<trame Syslog rejetée : {exc.reason}, "
+                        f"{declared_or_observed} octets > limite {self._max_bytes} octets ; "
+                        f"contenu non conservé>"
+                    )
+                    reason = (
+                        f"trame Syslog trop longue ({exc.reason}, {declared_or_observed} octets "
+                        f"> limite {self._max_bytes} octets)"
+                    )
+                    await self._reject_until_stored(source, placeholder, reason)
                     continue
                 if frame is None:
                     break

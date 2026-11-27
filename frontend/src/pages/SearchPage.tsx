@@ -1,198 +1,144 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { search } from '../api/analyst';
-import '../styles/design-system.css';
+/**
+ * Recherche avancée (C5 POST /search/{index}) : requêtes Lucene sur les index d'événements,
+ * d'alertes et d'incidents. Complète la recherche guidée de la page Événements.
+ */
+import { Fragment, useState, type FormEvent } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { search } from '../api/endpoints';
+import { Card, Empty, ErrorNotice, PageHeader, Pager, Segmented, LoadingRows } from '../components/ui';
+import { IconSearch } from '../components/icons';
+import { count, dateTime } from '../lib/format';
+import { eventSummary } from '../lib/readable';
+import type { EcsDocument } from '../types/api';
+import { EventDrawer } from './EventsPage';
 
-/** Lit un champ ECS qu'il soit imbriqué (source.name) ou aplati. */
-function pick(doc: Record<string, unknown>, path: string): string | undefined {
-  if (doc[path] != null) return String(doc[path]);
-  let cur: unknown = doc;
-  for (const part of path.split('.')) {
-    if (cur && typeof cur === 'object' && part in (cur as object))
-      cur = (cur as Record<string, unknown>)[part];
-    else return undefined;
-  }
-  return cur == null ? undefined : String(cur);
-}
+type Index = 'events' | 'alerts' | 'incidents';
+const PAGE = 50;
 
-function highlightMatch(text: string, term: string) {
-  if (!term) return <>{text}</>;
-  const idx = text.toLowerCase().indexOf(term.toLowerCase());
-  if (idx === -1) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <mark style={{ background: 'rgba(0,212,170,0.25)', color: 'var(--accent)', borderRadius: 2 }}>
-        {text.slice(idx, idx + term.length)}
-      </mark>
-      {text.slice(idx + term.length)}
-    </>
-  );
-}
+const EXAMPLES: Record<Index, { q: string; label: string }[]> = {
+  events: [
+    { q: 'event.outcome:failure AND event.category:authentication', label: 'Échecs d’authentification' },
+    { q: 'user.name:root', label: 'Activité du compte root' },
+    { q: 'source.ip:"203.0.113.7"', label: 'Une adresse IP précise' },
+  ],
+  alerts: [
+    { q: 'baolsec.severity.label:critique', label: 'Alertes critiques' },
+    { q: 'rule.id:*', label: 'Toutes les alertes' },
+  ],
+  incidents: [
+    { q: 'state:ouvert', label: 'Incidents ouverts' }, { q: 'severity:critique OR severity:elevee', label: 'Critiques ou élevés' },
+    { q: '*', label: 'Tous les incidents' },
+  ],
+};
+
+const FIELDS: Record<Index, [string, string][]> = {
+  events: [['event.category', 'authentication, network, process, web…'], ['event.outcome', 'success ou failure'], ['event.action', 'action normalisée'],
+    ['user.name', 'compte concerné'], ['source.ip', 'adresse à l’origine'], ['host.name', 'machine émettrice'], ['baolsec.source.name', 'source déclarée'], ['message', 'texte du journal']],
+  alerts: [['rule.id', 'code de la règle (AUTH-001…)'], ['rule.name', 'nom de la règle'], ['baolsec.severity.label', 'faible, moyenne, elevee, critique'],
+    ['user.name', 'compte concerné'], ['source.ip', 'adresse à l’origine'], ['host.name', 'machine concernée']],
+  incidents: [['state', 'ouvert, en_cours, clos'], ['severity', 'faible, moyenne, elevee, critique'], ['title', 'titre de l’incident'], ['alert_count', 'nombre d’alertes']],
+};
 
 export function SearchPage() {
-  const [query, setQuery]         = useState('');
-  const [submitted, setSubmitted] = useState('');
-  const [mode, setMode]           = useState<'events' | 'alerts' | 'incidents'>('events');
-  const limit = 50;
+  const [index, setIndex] = useState<Index>('events');
+  const [text, setText] = useState('');
+  const [query, setQuery] = useState<{ index: Index; q: string } | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [selected, setSelected] = useState<EcsDocument | null>(null);
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['search', mode, submitted],
-    queryFn: () => search[mode](submitted, limit),
-    enabled: submitted.trim().length >= 2,
+  const q = useQuery({
+    queryKey: ['lucene', query, offset], placeholderData: keepPreviousData,
+    queryFn: () => search.lucene(query!.index, query!.q, PAGE, offset),
+    enabled: query != null,
   });
 
-  // data est un SearchResult { total, hits[] }, pas un tableau
-  const hits  = data?.hits ?? [];
-  const total = data?.total ?? 0;
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (query.trim().length < 2) return;
-    setSubmitted(query.trim());
-  }
+  const run = (e?: FormEvent, value = text) => {
+    e?.preventDefault();
+    setOffset(0);
+    setQuery({ index, q: value.trim() || '*' });
+  };
+  const hits = q.data?.hits ?? [];
 
   return (
     <>
-      <div className="bs-page-header">
-        <div>
-          <h1 className="bs-page-title">Recherche <span>SIEM</span></h1>
-          <p className="bs-page-sub">Interrogez les événements, alertes et incidents indexés</p>
-        </div>
-      </div>
+      <PageHeader title="Recherche avancée"
+        subtitle="Interrogez directement les index avec la syntaxe Lucene (champ:valeur, AND, OR, NOT, guillemets, jokers *). Pour une recherche guidée, utilisez la page Événements." />
 
-      {/* Formulaire de recherche */}
-      <div className="bs-card bs-mb-16">
-        <form onSubmit={handleSubmit}>
-          <div className="bs-input-wrap" style={{ maxWidth: 640 }}>
-            <span className="bs-input-icon">⌕</span>
-            <input
-              className="bs-input"
-              type="search"
-              placeholder="Rechercher… (min. 2 caractères)"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              autoFocus
-            />
+      <Card className="mb-16">
+        <form className="card-body stack" style={{ gap: 14 }} onSubmit={run}>
+          <div className="row between">
+            <Segmented<Index> value={index} onChange={(v) => { setIndex(v); setQuery(null); }} options={[
+              { value: 'events', label: 'Événements' }, { value: 'alerts', label: 'Alertes' }, { value: 'incidents', label: 'Incidents' },
+            ]} />
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Sélection du mode */}
-            <div className="bs-pill-group" style={{ marginRight: 8 }}>
-              {(['events', 'alerts', 'incidents'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  className={`bs-pill${mode === m ? ' active' : ''}`}
-                  onClick={() => setMode(m)}
-                >
-                  {m === 'events' ? 'Événements' : m === 'alerts' ? 'Alertes' : 'Incidents'}
-                </button>
-              ))}
-            </div>
-            <button
-              type="submit"
-              className="bs-btn bs-btn-primary bs-btn-sm"
-              disabled={query.trim().length < 2 || isLoading}
-            >
-              {isLoading ? 'Recherche…' : 'Rechercher'}
-            </button>
-            {submitted && (
-              <button
-                type="button"
-                className="bs-btn bs-btn-ghost bs-btn-sm"
-                onClick={() => { setQuery(''); setSubmitted(''); }}
-              >
-                Réinitialiser
-              </button>
-            )}
-            {isFetching && !isLoading && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--fg4)' }}>
-                <span className="bs-spinner" style={{ width: 12, height: 12 }} /> Actualisation…
-              </span>
-            )}
+          <div className="row" style={{ flexWrap: 'nowrap' }}>
+            <input className="input mono" value={text} onChange={(e) => setText(e.target.value)} maxLength={2000}
+              placeholder={EXAMPLES[index][0].q} aria-label="Requête Lucene" />
+            <button className="btn primary" type="submit"><IconSearch />Rechercher</button>
+          </div>
+          <div className="row small">
+            <span className="faint">Exemples :</span>
+            {EXAMPLES[index].map((x) => (
+              <button key={x.q} type="button" className="btn sm" onClick={() => { setText(x.q); run(undefined, x.q); }}>{x.label}</button>
+            ))}
           </div>
         </form>
-      </div>
+      </Card>
 
-      {/* État vide initial */}
-      {!submitted && (
-        <div className="bs-card">
-          <div className="bs-empty">
-            <div className="bs-empty-icon" style={{ fontSize: 32 }}>⌕</div>
-            <div className="bs-empty-text">Lancez une recherche</div>
-            <div className="bs-empty-sub">
-              Saisissez un terme (min. 2 car.) puis sélectionnez le type de données à interroger
-            </div>
-          </div>
+      {!query && (
+        <div className="grid grid-2">
+          <Card title="Champs utiles" pad>
+            <dl className="kv">
+              {FIELDS[index].map(([f, d]) => (<Fragment key={f}><dt className="mono small" style={{ color: 'var(--text-2)' }}>{f}</dt><dd className="small muted">{d}</dd></Fragment>))}
+            </dl>
+          </Card>
+          <Card title="Syntaxe" pad>
+            <dl className="kv">
+              <dt className="mono small">a AND b</dt><dd className="small muted">les deux conditions (par défaut entre deux termes)</dd>
+              <dt className="mono small">a OR b</dt><dd className="small muted">l’une ou l’autre</dd>
+              <dt className="mono small">NOT a</dt><dd className="small muted">exclut les documents correspondants</dd>
+              <dt className="mono small">"texte exact"</dt><dd className="small muted">expression entre guillemets</dd>
+              <dt className="mono small">user.name:adm*</dt><dd className="small muted">joker sur la fin d’une valeur</dd>
+              <dt className="mono small">@timestamp:[now-1h TO now]</dt><dd className="small muted">intervalle de dates</dd>
+            </dl>
+          </Card>
         </div>
       )}
 
-      {/* Résultats */}
-      {submitted && (
-        <>
-          {isLoading ? (
-            <div className="bs-loading"><div className="bs-spinner" /> Recherche en cours…</div>
-          ) : hits.length === 0 ? (
-            <div className="bs-card">
-              <div className="bs-empty">
-                <div className="bs-empty-icon">◉</div>
-                <div className="bs-empty-text">Aucun résultat</div>
-                <div className="bs-empty-sub">
-                  Aucune donnée ne correspond à « {submitted} »
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="bs-card" style={{ padding: 0 }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: 'var(--fg2)', fontWeight: 500 }}>
-                  {total.toLocaleString('fr-FR')} résultat(s) pour « {submitted} »
-                </span>
-                <span className="bs-mono" style={{ fontSize: 11, color: 'var(--fg4)' }}>
-                  {hits.length} affiché(s)
-                </span>
-              </div>
-
-              <div className="bs-table-wrap" style={{ border: 'none' }}>
-                <table className="bs-table">
-                  <thead>
-                    <tr>
-                      <th>Horodatage</th>
-                      <th>Source / ID</th>
-                      <th>Type / Catégorie</th>
-                      <th>Message / Résumé</th>
-                    </tr>
-                  </thead>
+      {query && (
+        <Card title="Résultats" hint={q.data ? `${count(q.data.total)} document(s)` : undefined}
+          footer={q.data && q.data.total > 0 ? <Pager offset={offset} limit={PAGE} total={Math.min(q.data.total, 10_000)} count={hits.length} onChange={setOffset} /> : undefined}>
+          {q.error ? <div className="card-body"><ErrorNotice error={q.error} retry={() => q.refetch()} /></div> : (
+            <div className={`table-wrap ${q.isPlaceholderData ? 'is-stale' : ''}`}>
+              <table className="table">
+                <thead><tr><th>Horodatage</th><th>Résumé</th><th>Utilisateur</th><th>IP source</th><th>Hôte</th></tr></thead>
+                {q.isLoading ? <LoadingRows cols={5} /> : (
                   <tbody>
-                    {hits.map((h, i) => {
-                      const ts  = pick(h, '@timestamp') ?? pick(h, 'fired_at') ?? pick(h, 'opened_at') ?? pick(h, 'created_at');
-                      const src = pick(h, 'source_id') ?? pick(h, 'source.name') ?? pick(h, 'host.name') ?? '—';
-                      const typ = pick(h, 'event.action') ?? pick(h, 'event.category') ?? pick(h, 'severity') ?? pick(h, 'state') ?? '—';
-                      const msg = pick(h, 'message') ?? pick(h, 'title') ?? '—';
-                      return (
-                        <tr key={pick(h, '_id') ?? pick(h, 'id') ?? String(i)}>
-                          <td className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)', whiteSpace: 'nowrap' }}>
-                            {ts ? new Date(ts).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}
-                          </td>
-                          <td>
-                            <span className="bs-code" style={{ fontSize: 11 }}>{src}</span>
-                          </td>
-                          <td style={{ color: 'var(--fg3)', fontSize: 12 }}>{typ}</td>
-                          <td style={{ maxWidth: 400 }}>
-                            <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--fg2)' }}>
-                              {highlightMatch(msg, submitted)}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {hits.map((h) => (
+                      <tr key={h._id} className="clickable" onClick={() => setSelected(h)}>
+                        <td className="mono small nowrap">{dateTime((h['@timestamp'] as string | undefined) ?? (h.opened_at as string | undefined))}</td>
+                        <td className="truncate" style={{ maxWidth: 520 }}>{summary(h)}</td>
+                        <td className="mono small">{h.user?.name ?? '—'}</td>
+                        <td className="mono small">{h.source?.ip ?? '—'}</td>
+                        <td className="mono small">{h.host?.name ?? '—'}</td>
+                      </tr>
+                    ))}
                   </tbody>
-                </table>
-              </div>
+                )}
+              </table>
+              {!q.isLoading && hits.length === 0 && <Empty title="Aucun document" icon={<IconSearch />}>Vérifiez la syntaxe ou élargissez la requête.</Empty>}
             </div>
           )}
-        </>
+        </Card>
       )}
+
+      {selected && <EventDrawer doc={selected} onClose={() => setSelected(null)} />}
     </>
   );
+}
+
+function summary(h: EcsDocument): string {
+  if (typeof h.title === 'string') return h.title;
+  if (h.rule?.name) return `${h.rule.name}${h.message ? ` — ${h.message}` : ''}`;
+  return h.event ? eventSummary(h) : h.message ?? String(h._id);
 }

@@ -8,6 +8,7 @@ Matrice de droits :
   POST /sources             ✓      ✗        ✗
   PUT /sources/{id}         ✓      ✗        ✗
   DELETE /sources/{id}      ✓      ✗        ✗
+  POST /sources/{id}/credentials/cert  ✓  ✗  ✗   (A-13, C26)
   GET /rules                ✓      ✓        ✗
   POST /rules               ✓      ✗        ✗
   PUT /rules/{id}           ✓      ✗        ✗
@@ -71,11 +72,20 @@ FAKE_SOURCE = {
     "active": True, "silence_threshold_s": 300, "config": {},
     "created_at": NOW, "updated_at": NOW,
 }
+RULE_YAML = """id: TST-001
+name: Règle de test
+severity: moyenne
+type: simple
+category: [authentication]
+match:
+  event.category: authentication
+  event.outcome: failure
+message: "Échec pour {user.name}"
+"""
 FAKE_RULE = {
-    "id": uuid.uuid4(), "name": "R1", "description": None,
-    "logic": {}, "severity": "moyenne", "enabled": True,
-    "source_type": None, "threshold": None, "window_id": None,
-    "version": 1, "created_at": NOW, "updated_at": NOW,
+    "id": uuid.uuid4(), "name": "R1", "description": None, "rule_type": "simple",
+    "severity": "moyenne", "enabled": True, "version": 1, "definition_yaml": RULE_YAML,
+    "created_at": NOW, "updated_at": NOW,
 }
 FAKE_INCIDENT = {
     "id": uuid.uuid4(), "title": "Inc", "description": None,
@@ -131,6 +141,25 @@ class TestSourcesRBAC:
             assert client.delete(f"/api/v1/sources/{sid}", headers=ADMIN).status_code == 204
             assert client.delete(f"/api/v1/sources/{sid}", headers=ANALYST).status_code == 403
 
+    def test_post_cert_credential_only_admin(self, client):
+        """F-6 (C26) : test RBAC direct pour l'enregistrement d'un certificat client
+        (A-13) — jusqu'ici, seule la route /rotate était couverte par un test RBAC
+        explicite (test_post_only_admin ne vise pas /credentials/cert) ; l'audit a
+        relevé cette absence. ``add_cert_credential`` est protégée par la même
+        dépendance d'écriture (_WRITE, réservée ADMIN) que les autres routes
+        POST/DELETE sur /sources."""
+        sid = FAKE_SOURCE["id"]
+        row = {"transport": "syslog", "id": uuid.uuid4(), "created_at": NOW}
+        with patch("baolsec_api.database._pool", make_pool([row])):
+            assert client.post(
+                f"/api/v1/sources/{sid}/credentials/cert",
+                json={"cert_fingerprint": "aa" * 32}, headers=ADMIN,
+            ).status_code == 201
+            assert client.post(
+                f"/api/v1/sources/{sid}/credentials/cert",
+                json={"cert_fingerprint": "bb" * 32}, headers=ANALYST,
+            ).status_code == 403
+
 
 # ── Règles RBAC ───────────────────────────────────────────────────────────────
 
@@ -141,10 +170,19 @@ class TestRulesRBAC:
                 assert client.get("/api/v1/rules", headers=headers).status_code == 200
 
     def test_post_only_admin(self, client):
-        payload = {"name": "R2", "logic": {}}
-        with patch("baolsec_api.database._pool", make_pool([FAKE_RULE])):
+        payload = {"definition_yaml": RULE_YAML}
+        pool = make_pool([FAKE_RULE])
+        pool.connection().cursor().fetchone = AsyncMock(side_effect=[None, FAKE_RULE])
+        with patch("baolsec_api.database._pool", pool):
             assert client.post("/api/v1/rules", json=payload, headers=ADMIN).status_code == 201
             assert client.post("/api/v1/rules", json=payload, headers=ANALYST).status_code == 403
+
+    def test_enable_disable_only_admin(self, client):
+        rid = FAKE_RULE["id"]
+        with patch("baolsec_api.database._pool", make_pool([FAKE_RULE])):
+            for action in ("enable", "disable"):
+                assert client.post(f"/api/v1/rules/{rid}/{action}", headers=ADMIN).status_code == 204
+                assert client.post(f"/api/v1/rules/{rid}/{action}", headers=ANALYST).status_code == 403
 
     def test_delete_only_admin(self, client):
         rid = FAKE_RULE["id"]

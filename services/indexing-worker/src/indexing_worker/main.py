@@ -17,6 +17,7 @@ from baolsec_common.messaging.nats_adapter import NatsBroker
 from .config import Settings
 from .indexers import AlertIndexer, EventIndexer, IncidentIndexer
 from .opensearch_client import OpenSearchClient
+from .templates import TEMPLATES
 
 log = logging.getLogger("indexing_worker")
 
@@ -54,11 +55,29 @@ def create_health_app(os_client: OpenSearchClient) -> FastAPI:
     return app
 
 
+async def _ensure_templates(os_client: OpenSearchClient, stop: asyncio.Event) -> None:
+    """Applique les modèles d'index dès qu'OpenSearch répond (réessaie toutes les 10 s)."""
+    loop = asyncio.get_running_loop()
+    while not stop.is_set():
+        try:
+            await loop.run_in_executor(None, os_client.ensure_templates, TEMPLATES)
+            log.info("modèles d'index OpenSearch appliqués : %s", ", ".join(TEMPLATES))
+            return
+        except Exception as exc:  # noqa: BLE001
+            log.warning("modèles d'index non appliqués (%s), nouvel essai dans 10 s", type(exc).__name__)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                pass
+
+
 async def run(settings: Settings) -> None:
     os_client = OpenSearchClient(
         settings.opensearch_url,
         settings.opensearch_user,
         settings.opensearch_password,
+        ca_cert=settings.opensearch_ca_cert,
+        verify_certs=settings.opensearch_verify_certs,
     )
 
     broker = await connect_broker(settings)
@@ -89,6 +108,7 @@ async def run(settings: Settings) -> None:
     server.install_signal_handlers = lambda: None
 
     tasks = [
+        asyncio.create_task(_ensure_templates(os_client, stop_event), name="templates"),
         asyncio.create_task(EventIndexer(os_client).run(ev_consumer, stop_event), name="event-indexer"),
         asyncio.create_task(AlertIndexer(os_client).run(al_consumer, stop_event), name="alert-indexer"),
         asyncio.create_task(IncidentIndexer(os_client).run(inc_consumer, stop_event), name="incident-indexer"),

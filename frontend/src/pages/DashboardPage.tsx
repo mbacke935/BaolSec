@@ -1,218 +1,135 @@
-import type { CSSProperties } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { alerts, coverage, incidents, toList } from '../api/analyst';
-import type { Alert, CoverageState, Incident } from '../api/analyst';
-import '../styles/design-system.css';
-
-function severityClass(s: string) { return s.toLowerCase(); }
-function stateClass(s: string)    { return s.toLowerCase(); }
-function coverageClass(s: string) {
-  if (s === 'ACTIVE') return 'active';
-  if (s === 'SILENCIEUSE' || s === 'FLUX_INCOMPLET') return 'warn';
-  return 'neutral';
-}
-
-function relTime(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'à l\'instant';
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} h`;
-  return `${Math.floor(h / 24)} j`;
-}
-
-function stateLabel(s: string) {
-  const labels: Record<string, string> = {
-    ACTIVE: 'Active', SILENCIEUSE: 'Silencieuse',
-    FLUX_INCOMPLET: 'Incomplet', DESACTIVEE: 'Désactivée',
-  };
-  return labels[s] ?? s;
-}
+/** Tableau de bord de l'Analyste (C23) : ce qui demande une action, du plus grave au moins grave. */
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useFreshKeys } from '../lib/motion';
+import { prefetchIncident } from '../lib/prefetch';
+import { Link, useNavigate } from 'react-router-dom';
+import { alerts, coverage, incidents } from '../api/endpoints';
+import { useAuth } from '../auth/AuthContext';
+import {
+  AlertStatusBadge, Card, CoverageBadge, Empty, ErrorNotice, IncidentStateBadge, LoadingRows, PageHeader,
+  SeverityBadge, Stat,
+} from '../components/ui';
+import { IconCheck, IconRadar } from '../components/icons';
+import { ago, bySeverity } from '../lib/format';
 
 export function DashboardPage() {
-  const { data: incRaw, isLoading: loadInc } = useQuery({
-    queryKey: ['incidents'],
-    queryFn: () => incidents.list({ limit: 200 }),
-  });
-  const { data: alertRaw, isLoading: loadAlert } = useQuery({
-    queryKey: ['alerts-recent'],
-    queryFn: () => alerts.list({ limit: 20 }),
-  });
-  const { data: coverageRaw, isLoading: loadCov } = useQuery({
-    queryKey: ['coverage'],
-    queryFn: () => coverage.list(),
-  });
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const inc = useQuery({ queryKey: ['incidents', 'active'], queryFn: () => incidents.list({ active_only: true }), refetchInterval: 30_000 });
+  const al = useQuery({ queryKey: ['alerts', 'recent'], queryFn: () => alerts.list({ limit: 50 }), refetchInterval: 30_000 });
+  const cov = useQuery({ queryKey: ['coverage'], queryFn: coverage.list, refetchInterval: 60_000 });
 
-  const incidentList = toList<Incident>(incRaw);
-  const alertList    = toList<Alert>(alertRaw);
-  const coverageList = toList<CoverageState>(coverageRaw);
-
-  const openInc    = incidentList.filter((i) => i.state === 'OUVERT' || i.state === 'EN_COURS');
-  const criticalInc = openInc.filter((i) => i.severity === 'CRITIQUE' || i.severity === 'ELEVE');
-  const activeSrc  = coverageList.filter((c) => c.state === 'ACTIVE').length;
-  const warnSrc    = coverageList.filter((c) => c.state === 'SILENCIEUSE' || c.state === 'FLUX_INCOMPLET').length;
+  const qc = useQueryClient();
+  const freshInc = useFreshKeys(inc.data?.map((i) => i.id));
+  const freshAl = useFreshKeys(al.data?.map((a) => a.id));
+  const active = [...(inc.data ?? [])].sort((a, b) => bySeverity(a, b) || b.updated_at.localeCompare(a.updated_at));
+  const newAlerts = (al.data ?? []).filter((a) => a.status === 'nouvelle');
+  const mine = active.filter((i) => i.assigned_to === user?.id);
+  const degraded = (cov.data?.items ?? []).filter((c) => c.state === 'SILENCIEUSE' || c.state === 'FLUX_INCOMPLET');
+  const severeActive = active.filter((i) => i.severity === 'critique' || i.severity === 'elevee').length;
+  const hello = new Date().getHours() < 18 ? 'Bonjour' : 'Bonsoir';
 
   return (
     <>
-      <div className="bs-page-header">
-        <div>
-          <h1 className="bs-page-title">Tableau de <span>bord</span></h1>
-          <p className="bs-page-sub">Vue opérationnelle en temps réel — SOC BaolSec</p>
-        </div>
-        <Link to="/incidents" className="bs-btn bs-btn-secondary bs-btn-sm">
-          Tous les incidents →
-        </Link>
+      <PageHeader title={`${hello} ${user?.username ?? ''}`}
+        subtitle="Vue d'ensemble de ce qui demande votre attention. Actualisation automatique toutes les 30 secondes." />
+
+      <div className="grid grid-4 mb-16">
+        <Stat label="Alertes nouvelles" value={al.isLoading ? '…' : newAlerts.length} tone={newAlerts.length ? 'critical' : 'ok'}
+          sub={newAlerts.length ? 'À prendre en charge' : 'Aucune alerte en attente'} href="/alerts" />
+        <Stat label="Incidents actifs" value={inc.isLoading ? '…' : active.length} tone={active.length ? 'warn' : 'ok'}
+          sub={`${active.filter((i) => i.state === 'ouvert').length} ouvert(s) · ${active.filter((i) => i.state === 'en_cours').length} en cours`} href="/incidents" />
+        <Stat label="Critiques ou élevés" value={inc.isLoading ? '…' : severeActive} tone={severeActive ? 'critical' : 'ok'}
+          sub="Incidents actifs à traiter en priorité" href="/incidents" />
+        <Stat label="Sources à surveiller" value={cov.isLoading ? '…' : degraded.length} tone={degraded.length ? 'warn' : 'ok'}
+          sub={degraded.length ? 'Silencieuses ou flux incomplet' : 'Toutes les sources actives remontent'} href="/coverage" />
       </div>
 
-      {/* KPIs */}
-      <div className="bs-kpi-grid">
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--danger)' } as CSSProperties}>
-          <div className="bs-kpi-label">Incidents ouverts</div>
-          <div className={`bs-kpi-value ${openInc.length > 0 ? 'bs-glow-danger' : ''}`}>
-            {loadInc ? '…' : openInc.length}
-          </div>
-          <div className="bs-kpi-sub">En cours de traitement</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': '#ff6680' } as CSSProperties}>
-          <div className="bs-kpi-label">Critique / Élevé</div>
-          <div className={`bs-kpi-value ${criticalInc.length > 0 ? 'bs-glow-danger' : ''}`}>
-            {loadInc ? '…' : criticalInc.length}
-          </div>
-          <div className="bs-kpi-sub">Priorité immédiate</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--warn)' } as CSSProperties}>
-          <div className="bs-kpi-label">Alertes récentes</div>
-          <div className="bs-kpi-value">{loadAlert ? '…' : alertList.length}</div>
-          <div className="bs-kpi-sub">20 dernières alertes</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--success)' } as CSSProperties}>
-          <div className="bs-kpi-label">Sources actives</div>
-          <div className={`bs-kpi-value ${warnSrc > 0 ? 'bs-glow-warn' : 'bs-glow-accent'}`}>
-            {loadCov ? '…' : activeSrc}
-          </div>
-          <div className="bs-kpi-sub">
-            {warnSrc > 0 ? `${warnSrc} en anomalie` : 'Couverture nominale'}
-          </div>
-        </div>
-      </div>
+      <div className="grid grid-main">
+        <div className="stack">
+          <Card title="Incidents à traiter" hint={`${active.length} actif(s)`} actions={<Link className="btn sm" to="/incidents">Tous les incidents</Link>}>
+            {inc.error ? <div className="card-body"><ErrorNotice error={inc.error} retry={() => inc.refetch()} /></div> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Gravité</th><th>Incident</th><th>État</th><th>Responsable</th><th className="num">Alertes</th><th>Activité</th></tr></thead>
+                  {inc.isLoading ? <LoadingRows cols={6} rows={4} /> : (
+                    <tbody>
+                      {active.slice(0, 8).map((i) => (
+                        <tr key={i.id} className={`clickable ${freshInc.has(i.id) ? 'is-fresh' : ''}`} onClick={() => navigate(`/incidents/${i.id}`)} onMouseEnter={() => prefetchIncident(qc, i.id)}>
+                          <td><SeverityBadge value={i.severity} /></td>
+                          <td className="title-cell"><strong>{i.title}</strong><span>Ouvert {ago(i.opened_at)}</span></td>
+                          <td><IncidentStateBadge value={i.state} /></td>
+                          <td className={i.assigned_to_name ? '' : 'faint'}>{i.assigned_to_name ?? 'Non attribué'}</td>
+                          <td className="num">{i.alert_count}</td>
+                          <td className="faint nowrap">{ago(i.updated_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  )}
+                </table>
+                {!inc.isLoading && active.length === 0 && <Empty title="Aucun incident actif" icon={<IconCheck />}>Les nouvelles alertes corrélées apparaîtront ici.</Empty>}
+              </div>
+            )}
+          </Card>
 
-      <div className="bs-grid-2">
-        {/* Incidents ouverts */}
-        <div className="bs-card">
-          <div className="bs-section-header">
-            <span className="bs-section-title">Incidents actifs</span>
-            {!loadInc && <span className="bs-section-count">{openInc.length}</span>}
-          </div>
-
-          {loadInc ? (
-            <div className="bs-loading"><div className="bs-spinner" /> Chargement…</div>
-          ) : openInc.length === 0 ? (
-            <div className="bs-empty">
-              <div className="bs-empty-icon">✓</div>
-              <div className="bs-empty-text">Aucun incident ouvert</div>
-              <div className="bs-empty-sub">Situation nominale</div>
-            </div>
-          ) : (
-            <div className="bs-list">
-              {openInc.slice(0, 10).map((inc) => (
-                <Link key={inc.id} to={`/incidents/${inc.id}`} className="bs-list-item">
-                  <span className={`bs-dot ${severityClass(inc.severity)}`} />
-                  <span className="bs-list-item-title">{inc.title}</span>
-                  <span className={`bs-badge ${stateClass(inc.state)}`}>{inc.state.replace('_', ' ')}</span>
-                  <span className="bs-list-item-meta">{relTime(inc.opened_at)}</span>
-                </Link>
-              ))}
-            </div>
-          )}
+          <Card title="Dernières alertes" actions={<Link className="btn sm" to="/alerts">Toutes les alertes</Link>}>
+            {al.error ? <div className="card-body"><ErrorNotice error={al.error} /></div> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Gravité</th><th>Règle</th><th>Statut</th><th>Incident</th><th>Déclenchée</th></tr></thead>
+                  {al.isLoading ? <LoadingRows cols={5} rows={4} /> : (
+                    <tbody>
+                      {(al.data ?? []).slice(0, 8).map((a) => (
+                        <tr key={a.id} className={`clickable ${freshAl.has(a.id) ? 'is-fresh' : ''}`} onClick={() => navigate(a.incident_id ? `/incidents/${a.incident_id}` : '/alerts')}
+                          onMouseEnter={() => { if (a.incident_id) prefetchIncident(qc, a.incident_id); }}>
+                          <td><SeverityBadge value={a.severity} /></td>
+                          <td className="title-cell"><strong>{a.title}</strong><span className="mono">{a.rule_code ?? ''}</span></td>
+                          <td><AlertStatusBadge value={a.status} /></td>
+                          <td className="truncate faint" style={{ maxWidth: 220 }}>{a.incident_title ?? '—'}</td>
+                          <td className="faint nowrap">{ago(a.fired_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  )}
+                </table>
+                {!al.isLoading && !al.data?.length && <Empty title="Aucune alerte">Les alertes produites par les règles de détection s'afficheront ici.</Empty>}
+              </div>
+            )}
+          </Card>
         </div>
 
-        {/* Couverture sources */}
-        <div className="bs-card">
-          <div className="bs-section-header">
-            <span className="bs-section-title">Couverture sources</span>
-            <Link to="/coverage" className="bs-text-sm bs-text-accent">Détails →</Link>
-          </div>
+        <div className="stack">
+          <Card title="Mes dossiers" hint={`${mine.length} incident(s) attribué(s)`} pad>
+            {mine.length === 0 ? <p className="muted small">Aucun incident ne vous est attribué. Ouvrez un incident et choisissez « M'attribuer ».</p> : (
+              <ul className="mini-list" style={{ margin: '-16px -20px' }}>
+                {mine.slice(0, 6).map((i) => (
+                  <li key={i.id}><Link to={`/incidents/${i.id}`} className="grow"><div className="t" style={{ fontWeight: 600 }}>{i.title}</div>
+                    <div className="small faint">{i.alert_count} alerte(s) · activité {ago(i.updated_at)}</div></Link><SeverityBadge value={i.severity} /></li>
+                ))}
+              </ul>
+            )}
+          </Card>
 
-          {loadCov ? (
-            <div className="bs-loading"><div className="bs-spinner" /> Chargement…</div>
-          ) : coverageList.length === 0 ? (
-            <div className="bs-empty">
-              <div className="bs-empty-icon">◎</div>
-              <div className="bs-empty-text">Aucune source configurée</div>
-            </div>
-          ) : (
-            <div className="bs-list">
-              {coverageList.map((c) => (
-                <div key={c.source_id} className="bs-list-item" style={{ cursor: 'default' }}>
-                  <span className={`bs-dot ${coverageClass(c.state)}`} />
-                  <span className="bs-list-item-title">{c.source_name}</span>
-                  <span className={`bs-badge ${coverageClass(c.state)}`}>{stateLabel(c.state)}</span>
-                  <span className="bs-list-item-meta bs-mono" style={{ fontSize: 10 }}>
-                    {c.last_received_at
-                      ? new Date(c.last_received_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                      : '—'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Alertes récentes — pleine largeur */}
-        <div className="bs-card" style={{ gridColumn: '1 / -1' }}>
-          <div className="bs-section-header">
-            <span className="bs-section-title">Alertes récentes</span>
-            <Link to="/alerts" className="bs-text-sm bs-text-accent">Toutes les alertes →</Link>
-          </div>
-
-          {loadAlert ? (
-            <div className="bs-loading"><div className="bs-spinner" /> Chargement…</div>
-          ) : alertList.length === 0 ? (
-            <div className="bs-empty">
-              <div className="bs-empty-icon">◉</div>
-              <div className="bs-empty-text">Aucune alerte récente</div>
-            </div>
-          ) : (
-            <div className="bs-table-wrap">
-              <table className="bs-table">
-                <thead>
-                  <tr>
-                    <th>Sévérité</th>
-                    <th>Titre de l'alerte</th>
-                    <th>Règle</th>
-                    <th>Source</th>
-                    <th>Horodatage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {alertList.slice(0, 10).map((a: Alert) => (
-                    <tr key={a.id}>
-                      <td><span className={`bs-badge ${severityClass(a.severity)}`}>{a.severity}</span></td>
-                      <td style={{ color: 'var(--fg)', maxWidth: 300 }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-                          {a.title}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="bs-code">{a.rule_id?.slice(0, 8) ?? '—'}</span>
-                      </td>
-                      <td>
-                        <span className="bs-code">{a.source_id?.slice(0, 8) ?? '—'}</span>
-                      </td>
-                      <td className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)', whiteSpace: 'nowrap' }}>
-                        {new Date(a.fired_at).toLocaleString('fr-FR', {
-                          day: '2-digit', month: '2-digit',
-                          hour: '2-digit', minute: '2-digit',
-                        })}
-                      </td>
-                    </tr>
+          <Card title="Couverture des sources" actions={<Link className="btn sm" to="/coverage">Détails</Link>}>
+            {cov.error ? <div className="card-body"><ErrorNotice error={cov.error} /></div> : cov.isLoading ? <div className="card-body"><div className="skeleton" /></div> : (
+              <ul className="mini-list">
+                {[...(cov.data?.items ?? [])]
+                  .sort((a, b) => Number(b.state === 'SILENCIEUSE' || b.state === 'FLUX_INCOMPLET') - Number(a.state === 'SILENCIEUSE' || a.state === 'FLUX_INCOMPLET'))
+                  .slice(0, 8).map((c) => (
+                    <li key={c.source_id}>
+                      <div className="grow">
+                        <div style={{ fontWeight: 600 }}>{c.source_name}</div>
+                        <div className="small faint">
+                          {c.affected_rules.length ? `${c.affected_rules.length} règle(s) privée(s) de données` : c.last_received_at ? `Dernier événement ${ago(c.last_received_at)}` : 'Aucun événement reçu'}
+                        </div>
+                      </div>
+                      <CoverageBadge value={c.state} />
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                {!cov.data?.items.length && <Empty title="Aucune source déclarée" icon={<IconRadar />} />}
+              </ul>
+            )}
+          </Card>
         </div>
       </div>
     </>

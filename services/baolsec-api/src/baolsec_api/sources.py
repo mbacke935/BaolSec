@@ -228,7 +228,7 @@ async def rotate_credential(
     Le secret n'est renvoyé qu'une seule fois ; seul son empreinte SHA-256 est
     stockée (secret_hash), identique au schéma vérifié par la passerelle.
     """
-    token = secrets.token_urlsafe(32)
+    token = "bsk_" + secrets.token_urlsafe(32)
     secret_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute("SELECT 1 FROM config.sources WHERE id = %s", (source_id,))

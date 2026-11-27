@@ -20,16 +20,25 @@ router = APIRouter(prefix="/coverage", tags=["coverage"])
 
 _READ = Depends(require_role(UserRole.ANALYST, UserRole.ADMIN))
 
+# Toutes les sources déclarées, y compris celles que le service Couverture n'a pas encore évaluées
+# (état INCONNUE) ; règles affectées en cours (EF-09 : « les règles dépendant des données
+# manquantes sont affichées »).
 _SELECT = """
-SELECT cs.source_id, s.name AS source_name, cs.state,
+SELECT s.id AS source_id, s.name AS source_name,
+       COALESCE(cs.state::text, CASE WHEN s.is_enabled THEN 'INCONNUE' ELSE 'DESACTIVEE' END) AS state,
        cs.last_received_at, cs.last_normalized_at AS last_processed_at,
        COALESCE(st.received, 0) AS received_count,
        COALESCE(st.normalized, 0) AS normalized_count,
-       cs.last_evaluated_at AS evaluated_at
-  FROM couverture.coverage_state cs
-  JOIN config.sources s ON s.id = cs.source_id
+       cs.last_evaluated_at AS evaluated_at, cs.state_since,
+       s.source_type::text AS source_type, s.silence_threshold_s,
+       COALESCE((SELECT jsonb_agg(jsonb_build_object('rule_id', ar.rule_id, 'name', r.name,
+                                                     'cause', ar.cause, 'since', ar.since) ORDER BY r.name)
+                   FROM couverture.coverage_affected_rules ar JOIN config.rules r ON r.id = ar.rule_id
+                  WHERE ar.source_id = s.id AND ar.resolved_at IS NULL), '[]'::jsonb) AS affected_rules
+  FROM config.sources s
+  LEFT JOIN couverture.coverage_state cs ON cs.source_id = s.id
   LEFT JOIN (SELECT source_id, SUM(received_count) AS received, SUM(normalized_count) AS normalized
-               FROM couverture.coverage_stats GROUP BY source_id) st ON st.source_id = cs.source_id
+               FROM couverture.coverage_stats GROUP BY source_id) st ON st.source_id = s.id
 """
 
 
@@ -41,8 +50,7 @@ async def list_coverage(
     offset: int = Query(0, ge=0),
 ):
     select_sql = _SELECT.strip() + " ORDER BY s.name"
-    count_sql = ("SELECT COUNT(*) AS count FROM couverture.coverage_state cs"
-                 " JOIN config.sources s ON s.id = cs.source_id")
+    count_sql = "SELECT COUNT(*) AS count FROM config.sources s"
     return await paginate(conn, select_sql, count_sql, [], limit, offset)
 
 
@@ -58,7 +66,9 @@ async def coverage_history(
     if source_id:
         conds.append("source_id = %s"); args.append(source_id)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
-    q = f"SELECT * FROM couverture.coverage_state_history {where} ORDER BY changed_at DESC LIMIT %s OFFSET %s"
+    q = (f"SELECT h.*, s.name AS source_name FROM couverture.coverage_state_history h "
+         f"JOIN config.sources s ON s.id = h.source_id {where.replace('source_id', 'h.source_id')} "
+         f"ORDER BY h.changed_at DESC LIMIT %s OFFSET %s")
     args.extend([limit, offset])
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(q, args)
@@ -72,8 +82,8 @@ async def get_coverage(
     _user=_READ,
 ):
     async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(_SELECT + " WHERE cs.source_id = %s", (source_id,))
+        await cur.execute(_SELECT + " WHERE s.id = %s", (source_id,))
         row = await cur.fetchone()
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Couverture introuvable pour cette source")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source introuvable")
     return row

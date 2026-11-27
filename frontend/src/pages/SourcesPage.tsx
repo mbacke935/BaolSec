@@ -1,484 +1,291 @@
-import { useState, useEffect, useCallback } from 'react';
-import { apiClient as api } from '../api/client';
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type SourceType    = 'linux' | 'windows' | 'firewall' | 'http';
-type Transport     = 'https' | 'syslog';
-type IngestionMode = 'direct' | 'rejeu';
-type Criticality   = 'faible' | 'moyenne' | 'elevee' | 'critique';
-type Environment   = 'production' | 'staging' | 'test' | 'developpement';
-
-interface SourceConfig {
-  transport: Transport;
-  ingestion_mode: IngestionMode;
-  host: string | null;
-  criticality: Criticality | null;
-  expected_min_events_per_h: number | null;
-  hostname: string | null;
-  ip_address: string | null;
-  environment: Environment | null;
-  tags: string[];
-  responsible: string | null;
-}
-
-interface Source {
-  id: string;
-  name: string;
-  description: string | null;
-  type: SourceType;
-  active: boolean;
-  silence_threshold_s: number;
-  config: SourceConfig;
-  created_at: string;
-  updated_at: string;
-}
-
-function toList<T>(raw: unknown): T[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw as T[];
-  const r = raw as Record<string, unknown>;
-  if (Array.isArray(r.items)) return r.items as T[];
-  return [];
-}
-
-// ─── Stepper Modal ───────────────────────────────────────────────────────────
-
-const STEPS = ['Identification', 'Collecte', 'Supervision', 'Confirmation'];
-
-interface FormState {
-  // Step 1
-  name: string;
-  type: SourceType;
-  hostname: string;
-  ip_address: string;
-  environment: Environment | '';
-  criticality: Criticality | '';
-  description: string;
-  // Step 2
-  transport: Transport;
-  ingestion_mode: IngestionMode;
-  host: string;
-  expected_min_events_per_h: string;
-  // Step 3
-  silence_threshold_s: string;
-  tags: string;
-  responsible: string;
-  active: boolean;
-}
-
-const INITIAL: FormState = {
-  name: '', type: 'linux', hostname: '', ip_address: '',
-  environment: '', criticality: '', description: '',
-  transport: 'https', ingestion_mode: 'direct', host: '',
-  expected_min_events_per_h: '',
-  silence_threshold_s: '600', tags: '', responsible: '', active: true,
-};
-
-function SourceModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [step, setStep]     = useState(0);
-  const [form, setForm]     = useState<FormState>(INITIAL);
-  const [error, setError]   = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const set = (k: keyof FormState, v: string | boolean) =>
-    setForm(f => ({ ...f, [k]: v }));
-
-  // ── Validation par étape ──
-  function validateStep(s: number): string {
-    if (s === 0 && !form.name.trim()) return 'Le nom est obligatoire.';
-    return '';
-  }
-
-  function next() {
-    const err = validateStep(step);
-    if (err) { setError(err); return; }
-    setError('');
-    setStep(s => Math.min(s + 1, 3));
-  }
-  function prev() { setError(''); setStep(s => Math.max(s - 1, 0)); }
-
-  async function submit() {
-    setSaving(true);
-    setError('');
-    try {
-      const tagList = form.tags.split(',').map(t => t.trim()).filter(Boolean);
-      const body = {
-        name: form.name.trim(),
-        description: form.description.trim() || null,
-        type: form.type,
-        active: form.active,
-        silence_threshold_s: parseInt(form.silence_threshold_s, 10),
-        config: {
-          transport: form.transport,
-          ingestion_mode: form.ingestion_mode,
-          host: form.host.trim() || null,
-          criticality: form.criticality || null,
-          expected_min_events_per_h: form.expected_min_events_per_h
-            ? parseInt(form.expected_min_events_per_h, 10) : null,
-          hostname:   form.hostname.trim() || null,
-          ip_address: form.ip_address.trim() || null,
-          environment: form.environment || null,
-          tags: tagList,
-          responsible: form.responsible.trim() || null,
-        },
-      };
-      await api.post('/sources', body);
-      onCreated();
-      onClose();
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string };
-      setError(err?.response?.data?.detail ?? err?.message ?? 'Erreur inattendue');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // ── Rendu des étapes ──
-  function renderStep() {
-    switch (step) {
-      case 0: return (
-        <div className="bs-form-grid">
-          <label className="bs-label">Nom <span className="bs-required">*</span></label>
-          <input className="bs-input" placeholder="ex. firewall-paris-01"
-            value={form.name} onChange={e => set('name', e.target.value)} autoFocus />
-
-          <label className="bs-label">Type de source</label>
-          <select className="bs-select" value={form.type}
-            onChange={e => set('type', e.target.value as SourceType)}>
-            <option value="linux">Linux</option>
-            <option value="windows">Windows</option>
-            <option value="firewall">Firewall</option>
-            <option value="http">HTTP</option>
-          </select>
-
-          <label className="bs-label">Hostname</label>
-          <input className="bs-input" placeholder="ex. srv-prod-01.internal"
-            value={form.hostname} onChange={e => set('hostname', e.target.value)} />
-
-          <label className="bs-label">Adresse IP</label>
-          <input className="bs-input" placeholder="ex. 192.168.1.10"
-            value={form.ip_address} onChange={e => set('ip_address', e.target.value)} />
-
-          <label className="bs-label">Environnement</label>
-          <select className="bs-select" value={form.environment}
-            onChange={e => set('environment', e.target.value as Environment | '')}>
-            <option value="">— Non défini —</option>
-            <option value="production">Production</option>
-            <option value="staging">Staging</option>
-            <option value="test">Test</option>
-            <option value="developpement">Développement</option>
-          </select>
-
-          <label className="bs-label">Criticité</label>
-          <select className="bs-select" value={form.criticality}
-            onChange={e => set('criticality', e.target.value as Criticality | '')}>
-            <option value="">— Non définie —</option>
-            <option value="faible">Faible</option>
-            <option value="moyenne">Moyenne</option>
-            <option value="elevee">Élevée</option>
-            <option value="critique">Critique</option>
-          </select>
-
-          <label className="bs-label">Description</label>
-          <textarea className="bs-input" rows={3} placeholder="Description optionnelle…"
-            value={form.description} onChange={e => set('description', e.target.value)} />
-        </div>
-      );
-
-      case 1: return (
-        <div className="bs-form-grid">
-          <label className="bs-label">Transport</label>
-          <select className="bs-select" value={form.transport}
-            onChange={e => set('transport', e.target.value as Transport)}>
-            <option value="https">HTTPS</option>
-            <option value="syslog">Syslog</option>
-          </select>
-
-          <label className="bs-label">Mode d'ingestion</label>
-          <select className="bs-select" value={form.ingestion_mode}
-            onChange={e => set('ingestion_mode', e.target.value as IngestionMode)}>
-            <option value="direct">Direct</option>
-            <option value="rejeu">Rejeu</option>
-          </select>
-
-          <label className="bs-label">Host / gateway de collecte</label>
-          <input className="bs-input" placeholder="ex. collector.baolsec.local"
-            value={form.host} onChange={e => set('host', e.target.value)} />
-
-          <label className="bs-label">Événements minimum / heure</label>
-          <input className="bs-input" type="number" min="0"
-            placeholder="ex. 100 (laisser vide = pas de seuil)"
-            value={form.expected_min_events_per_h}
-            onChange={e => set('expected_min_events_per_h', e.target.value)} />
-        </div>
-      );
-
-      case 2: return (
-        <div className="bs-form-grid">
-          <label className="bs-label">Seuil de silence</label>
-          <select className="bs-select" value={form.silence_threshold_s}
-            onChange={e => set('silence_threshold_s', e.target.value)}>
-            <option value="300">5 minutes</option>
-            <option value="600">10 minutes</option>
-            <option value="900">15 minutes</option>
-            <option value="1800">30 minutes</option>
-            <option value="3600">1 heure</option>
-          </select>
-
-          <label className="bs-label">Tags <span className="bs-hint">(séparés par des virgules)</span></label>
-          <input className="bs-input" placeholder="ex. dmz, paris, critique"
-            value={form.tags} onChange={e => set('tags', e.target.value)} />
-
-          <label className="bs-label">Responsable</label>
-          <input className="bs-input" placeholder="ex. Jean Dupont ou equipe-soc"
-            value={form.responsible} onChange={e => set('responsible', e.target.value)} />
-
-          <label className="bs-label">Statut initial</label>
-          <div className="bs-toggle-row">
-            <label className="bs-toggle">
-              <input type="checkbox" checked={form.active}
-                onChange={e => set('active', e.target.checked)} />
-              <span className="bs-toggle-slider" />
-            </label>
-            <span>{form.active ? 'Active' : 'Désactivée'}</span>
-          </div>
-        </div>
-      );
-
-      case 3: {
-        const tagList = form.tags.split(',').map(t => t.trim()).filter(Boolean);
-        return (
-          <div className="bs-summary">
-            <Row label="Nom"          value={form.name} />
-            <Row label="Type"         value={form.type} />
-            {form.hostname   && <Row label="Hostname"      value={form.hostname} />}
-            {form.ip_address && <Row label="Adresse IP"    value={form.ip_address} />}
-            {form.environment && <Row label="Environnement" value={form.environment} />}
-            {form.criticality && <Row label="Criticité"    value={form.criticality} />}
-            <hr className="bs-divider" />
-            <Row label="Transport"      value={form.transport} />
-            <Row label="Ingestion"      value={form.ingestion_mode} />
-            {form.host && <Row label="Gateway" value={form.host} />}
-            <hr className="bs-divider" />
-            <Row label="Silence"
-              value={SILENCE_LABELS[form.silence_threshold_s] ?? form.silence_threshold_s + 's'} />
-            {tagList.length > 0 && (
-              <div className="bs-summary-row">
-                <span className="bs-summary-label">Tags</span>
-                <div className="bs-tag-list">
-                  {tagList.map(t => <span key={t} className="bs-badge">{t}</span>)}
-                </div>
-              </div>
-            )}
-            {form.responsible && <Row label="Responsable" value={form.responsible} />}
-            <Row label="Statut" value={form.active ? '✓ Active' : '✗ Désactivée'} />
-            {form.description && <Row label="Description" value={form.description} />}
-          </div>
-        );
-      }
-    }
-  }
-
-  return (
-    <div className="bs-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="bs-modal">
-        {/* Header */}
-        <div className="bs-modal-header">
-          <h2 className="bs-modal-title">Nouvelle source</h2>
-          <button className="bs-btn-icon" onClick={onClose} aria-label="Fermer">✕</button>
-        </div>
-
-        {/* Stepper */}
-        <div className="bs-stepper">
-          {STEPS.map((label, i) => (
-            <div key={i} className={`bs-step ${i === step ? 'bs-step--active' : ''} ${i < step ? 'bs-step--done' : ''}`}>
-              <div className="bs-step-dot">{i < step ? '✓' : i + 1}</div>
-              <span className="bs-step-label">{label}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Body */}
-        <div className="bs-modal-body">
-          {error && <div className="bs-alert bs-alert--error">{error}</div>}
-          {renderStep()}
-        </div>
-
-        {/* Footer */}
-        <div className="bs-modal-footer">
-          {step > 0
-            ? <button className="bs-btn bs-btn--secondary" onClick={prev}>Précédent</button>
-            : <button className="bs-btn bs-btn--ghost" onClick={onClose}>Annuler</button>
-          }
-          {step < 3
-            ? <button className="bs-btn bs-btn--primary" onClick={next}>Suivant</button>
-            : <button className="bs-btn bs-btn--primary" onClick={submit} disabled={saving}>
-                {saving ? 'Enregistrement…' : 'Enregistrer'}
-              </button>
-          }
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const SILENCE_LABELS: Record<string, string> = {
-  '300': '5 min', '600': '10 min', '900': '15 min', '1800': '30 min', '3600': '1 h',
-};
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bs-summary-row">
-      <span className="bs-summary-label">{label}</span>
-      <span className="bs-summary-value">{value}</span>
-    </div>
-  );
-}
-
-// ─── Badges helpers ───────────────────────────────────────────────────────────
-
-const CRIT_CLASS: Record<string, string> = {
-  faible: 'bs-badge--success', moyenne: 'bs-badge--warning',
-  elevee: 'bs-badge--danger',  critique: 'bs-badge--critical',
-};
-
-const ENV_CLASS: Record<string, string> = {
-  production: 'bs-badge--danger', staging: 'bs-badge--warning',
-  test: 'bs-badge--info', developpement: 'bs-badge--neutral',
-};
-
-// ─── Page principale ──────────────────────────────────────────────────────────
+/**
+ * Référentiel des sources (EF-01/EF-02, C5 /sources) : déclaration, configuration et identifiants
+ * d'ingestion. Écriture réservée à l'Administrateur ; l'Analyste consulte.
+ */
+import { useDeferredValue, useState, type FormEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { sources } from '../api/endpoints';
+import { errorMessage } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
+import {
+  Badge, Card, Confirm, CopyButton, Empty, ErrorNotice, Field, LoadingRows, Modal, Notice, PageHeader, Tabs, useToast,
+} from '../components/ui';
+import { IconEdit, IconKey, IconPlus, IconServer } from '../components/icons';
+import { SourceWizard, AgentGuide } from './SourceWizard';
+import { dateTime, duration, ENVIRONMENT, SEVERITIES, SEVERITY, SOURCE_TYPE } from '../lib/format';
+import type { Environment, Severity, Source, SourceConfig, SourceType, TokenCredential, Transport } from '../types/api';
 
 export function SourcesPage() {
-  const [sources, setSources] = useState<Source[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [search, setSearch] = useState('');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+  const [text, setText] = useState('');
+  const [editing, setEditing] = useState<Source | 'new' | null>(null);
+  const [creds, setCreds] = useState<Source | null>(null);
+  const q = useQuery({ queryKey: ['sources', 'all'], queryFn: () => sources.list() });
 
-  const fetchSources = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { data } = await api.get<unknown>('/sources', { params: { page: 1, size: 50 } });
-      setSources(toList<Source>(data));
-    } catch {
-      setSources([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchSources(); }, [fetchSources]);
-
-  const filtered = sources.filter(s =>
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    (s.config.hostname ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (s.config.ip_address ?? '').includes(search)
-  );
-
-  async function toggleSource(id: string, active: boolean) {
-    try {
-      await api.patch(`/sources/${id}`, { active: !active });
-      fetchSources();
-    } catch { /* silencieux */ }
-  }
+  const needle = useDeferredValue(text).trim().toLowerCase();
+  const rows = (q.data?.items ?? [])
+    .filter((s) => !needle || `${s.name} ${s.description ?? ''} ${s.config.hostname ?? ''} ${s.config.ip_address ?? ''} ${(s.config.tags ?? []).join(' ')} ${s.config.responsible ?? ''}`.toLowerCase().includes(needle))
+    .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
 
   return (
-    <div className="bs-page">
-      {/* Toolbar */}
-      <div className="bs-toolbar">
-        <div className="bs-toolbar-left">
-          <h1 className="bs-page-title">Sources</h1>
-          <span className="bs-badge bs-badge--neutral">{sources.length}</span>
-        </div>
-        <div className="bs-toolbar-right">
-          <input
-            className="bs-input bs-search"
-            placeholder="Rechercher…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          <button className="bs-btn bs-btn--primary" onClick={() => setShowModal(true)}>
-            + Nouvelle source
-          </button>
-        </div>
-      </div>
+    <>
+      <PageHeader title="Sources"
+        subtitle={isAdmin
+          ? 'Chaque équipement qui envoie des journaux est déclaré ici. « Ajouter une source » guide la déclaration, la création de l’identifiant d’ingestion, la configuration de l’agent et la vérification de la réception.'
+          : 'Équipements et applications qui envoient leurs journaux à BaolSec (consultation).'}
+        actions={isAdmin && <button className="btn primary" onClick={() => setEditing('new')}><IconPlus />Ajouter une source</button>} />
 
-      {/* Table */}
-      {loading ? (
-        <div className="bs-loader">Chargement…</div>
-      ) : filtered.length === 0 ? (
-        <div className="bs-empty">
-          <p>Aucune source{search ? ' correspondant à votre recherche' : ' configurée'}.</p>
-          {!search && (
-            <button className="bs-btn bs-btn--primary" onClick={() => setShowModal(true)}>
-              Ajouter une source
-            </button>
+      <Card>
+        <div className="card-body">
+          <div className="filters">
+            <Field label="Filtrer" className="grow">
+              <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Nom, hôte, adresse IP, étiquette, responsable…" />
+            </Field>
+          </div>
+        </div>
+        {q.error ? <div className="card-body"><ErrorNotice error={q.error} retry={() => q.refetch()} /></div> : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Source</th><th>Type</th><th>Transport</th><th>Hôte</th><th>Environnement</th><th>Seuil de silence</th><th>État</th>{isAdmin && <th />}</tr></thead>
+              {q.isLoading ? <LoadingRows cols={isAdmin ? 8 : 7} /> : (
+                <tbody>
+                  {rows.map((s) => (
+                    <tr key={s.id} className={s.active ? '' : 'dim'}>
+                      <td className="title-cell" style={{ maxWidth: 320 }}>
+                        <strong className="truncate">{s.name}</strong>
+                        {(s.description || s.config.tags?.length) ? <span className="truncate">{s.description || s.config.tags.map((t) => `#${t}`).join(' ')}</span> : null}
+                      </td>
+                      <td className="small nowrap">{SOURCE_TYPE[s.type] ?? s.type}</td>
+                      <td><span className="tag nowrap">{s.config.transport === 'syslog' ? 'Syslog TLS' : 'HTTPS'}</span></td>
+                      <td className="mono small">{s.config.hostname ?? s.config.host ?? <span className="faint">—</span>}{s.config.ip_address && <div className="faint">{s.config.ip_address}</div>}</td>
+                      <td className="small">{s.config.environment ? ENVIRONMENT[s.config.environment] : <span className="faint">—</span>}</td>
+                      <td className="small">{duration(s.silence_threshold_s)}</td>
+                      <td>{s.active ? <Badge tone="ok" dot>Active</Badge> : <Badge>Désactivée</Badge>}</td>
+                      {isAdmin && (
+                        <td className="actions">
+                          <button className="btn sm" onClick={() => setCreds(s)}><IconKey />Identifiants</button>{' '}
+                          <button className="btn sm ghost" onClick={() => setEditing(s)} aria-label={`Modifier ${s.name}`}><IconEdit /></button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              )}
+            </table>
+            {!q.isLoading && rows.length === 0 && (
+              <Empty title={needle ? 'Aucune source ne correspond' : 'Aucune source déclarée'} icon={<IconServer />}>
+                {isAdmin && !needle ? 'Commencez par « Ajouter une source » : l’assistant vous guide jusqu’à la réception du premier événement.' : null}
+              </Empty>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {editing === 'new' && <SourceWizard onClose={() => setEditing(null)} />}
+      {editing && editing !== 'new' && <SourceForm source={editing} onClose={() => setEditing(null)} />}
+      {creds && <CredentialsModal source={creds} onClose={() => setCreds(null)} />}
+    </>
+  );
+}
+
+// ── Formulaire de source ─────────────────────────────────────────────────────
+
+interface FormState {
+  name: string; description: string; type: SourceType; transport: Transport; active: boolean; silence_min: string;
+  hostname: string; ip_address: string; environment: '' | Environment; criticality: '' | Severity; responsible: string;
+  tags: string; expected: string;
+}
+
+function initial(s: Source | null): FormState {
+  const c: Partial<SourceConfig> = s?.config ?? {};
+  return {
+    name: s?.name ?? '', description: s?.description ?? '', type: (s?.type ?? 'linux') as SourceType,
+    transport: (c.transport ?? 'https') as Transport, active: s?.active ?? true,
+    silence_min: String(Math.round((s?.silence_threshold_s ?? 900) / 60)),
+    hostname: c.hostname ?? c.host ?? '', ip_address: c.ip_address ?? '', environment: c.environment ?? '',
+    criticality: c.criticality ?? '', responsible: c.responsible ?? '', tags: (c.tags ?? []).join(', '),
+    expected: c.expected_min_events_per_h != null ? String(c.expected_min_events_per_h) : '',
+  };
+}
+
+function SourceForm({ source, onClose }: { source: Source | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [f, setF] = useState<FormState>(() => initial(source));
+  const [error, setError] = useState<string | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
+  const set = <K extends keyof FormState>(k: K) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value as FormState[K] }));
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const minutes = Number(f.silence_min);
+      if (!Number.isFinite(minutes) || minutes < 1) throw new Error('Le seuil de silence doit être d’au moins 1 minute.');
+      const config: Partial<SourceConfig> = {
+        transport: f.transport, hostname: f.hostname.trim() || null, host: f.hostname.trim() || null,
+        ip_address: f.ip_address.trim() || null, environment: f.environment || null, criticality: f.criticality || null,
+        responsible: f.responsible.trim() || null, tags: f.tags.split(',').map((t) => t.trim()).filter(Boolean),
+        expected_min_events_per_h: f.expected.trim() ? Number(f.expected) : null,
+      };
+      const body = { description: f.description.trim() || null, type: f.type, active: f.active, silence_threshold_s: Math.round(minutes * 60), config };
+      return source ? sources.update(source.id, body) : sources.create({ name: f.name.trim(), ...body });
+    },
+    onSuccess: () => {
+      toast.ok(source ? 'Source mise à jour.' : 'Source déclarée. Générez maintenant son identifiant d’ingestion.');
+      qc.invalidateQueries({ queryKey: ['sources'] });
+      qc.invalidateQueries({ queryKey: ['coverage'] });
+      onClose();
+    },
+    onError: (err) => setError(err instanceof Error && !('isAxiosError' in err) ? err.message : errorMessage(err)),
+  });
+
+  const submit = (e: FormEvent) => { e.preventDefault(); setError(null); if (!source && !f.name.trim()) { setError('Le nom est obligatoire.'); return; } save.mutate(); };
+
+  return (
+    <Modal wide title={source ? `Modifier « ${source.name} »` : 'Ajouter une source'}
+      subtitle={source ? 'Le nom d’une source est définitif (il identifie la source dans les événements).' : 'Une source correspond à un équipement ou une application qui envoie ses journaux.'}
+      onClose={onClose}
+      footer={<>
+        {source && source.active && <button className="btn danger" style={{ marginRight: 'auto' }} onClick={() => setConfirmOff(true)}>Désactiver</button>}
+        <button className="btn ghost" onClick={onClose}>Annuler</button>
+        <button className="btn primary" form="source-form" type="submit" disabled={save.isPending}>{save.isPending && <span className="spinner" />}{source ? 'Enregistrer' : 'Déclarer'}</button>
+      </>}>
+      <form id="source-form" className="stack" onSubmit={submit}>
+        {error && <Notice kind="error">{error}</Notice>}
+        <div className="form-grid">
+          <Field label="Nom" help="Ex. : srv-web-01 ou pare-feu-siege">
+            <input className="input" value={f.name} onChange={set('name')} disabled={!!source} maxLength={200} autoFocus={!source} />
+          </Field>
+          <Field label="Type">
+            <select className="select" value={f.type} onChange={set('type')}>
+              {(Object.keys(SOURCE_TYPE) as SourceType[]).map((t) => <option key={t} value={t}>{SOURCE_TYPE[t]}</option>)}
+            </select>
+          </Field>
+          <Field label="Description" className="full"><input className="input" value={f.description} onChange={set('description')} placeholder="Rôle de l’équipement, emplacement…" /></Field>
+          <Field label="Transport" help={f.transport === 'https' ? 'Agent Fluent Bit en HTTPS, authentifié par jeton.' : 'Syslog sur TLS (port 6514), authentifié par certificat client.'}>
+            <select className="select" value={f.transport} onChange={set('transport')}>
+              <option value="https">HTTPS (jeton)</option><option value="syslog">Syslog TLS (certificat)</option>
+            </select>
+          </Field>
+          <Field label="Seuil de silence (minutes)" help="Au-delà sans événement, la source passe « silencieuse ».">
+            <input className="input" type="number" min={1} value={f.silence_min} onChange={set('silence_min')} />
+          </Field>
+          <Field label="Nom d’hôte"><input className="input mono" value={f.hostname} onChange={set('hostname')} placeholder="srv-web-01.interne" /></Field>
+          <Field label="Adresse IP"><input className="input mono" value={f.ip_address} onChange={set('ip_address')} placeholder="10.0.4.23" /></Field>
+          <Field label="Environnement">
+            <select className="select" value={f.environment} onChange={set('environment')}>
+              <option value="">Non précisé</option>
+              {(Object.keys(ENVIRONMENT) as Environment[]).map((e) => <option key={e} value={e}>{ENVIRONMENT[e]}</option>)}
+            </select>
+          </Field>
+          <Field label="Criticité de l’actif">
+            <select className="select" value={f.criticality} onChange={set('criticality')}>
+              <option value="">Non précisée</option>
+              {SEVERITIES.map((s) => <option key={s} value={s}>{SEVERITY[s].label}</option>)}
+            </select>
+          </Field>
+          <Field label="Responsable"><input className="input" value={f.responsible} onChange={set('responsible')} placeholder="Équipe ou personne à contacter" /></Field>
+          <Field label="Volume minimal attendu (événements / heure)" help="Facultatif : sert à repérer un flux anormalement faible.">
+            <input className="input" type="number" min={0} value={f.expected} onChange={set('expected')} />
+          </Field>
+          <Field label="Étiquettes" className="full" help="Séparées par des virgules."><input className="input" value={f.tags} onChange={set('tags')} placeholder="dmz, web, paiement" /></Field>
+          {source && !source.active && (
+            <label className="check full"><input type="checkbox" checked={f.active} onChange={(e) => setF((x) => ({ ...x, active: e.target.checked }))} />Réactiver la source</label>
           )}
         </div>
-      ) : (
-        <div className="bs-table-wrapper">
-          <table className="bs-table">
-            <thead>
-              <tr>
-                <th>Nom</th>
-                <th>Type</th>
-                <th>Hostname / IP</th>
-                <th>Env</th>
-                <th>Criticité</th>
-                <th>Transport</th>
-                <th>Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(s => (
-                <tr key={s.id}>
-                  <td>
-                    <div className="bs-cell-primary">{s.name}</div>
-                    {s.description && <div className="bs-cell-secondary">{s.description}</div>}
-                  </td>
-                  <td>
-                    <span className="bs-badge bs-badge--type">{s.type}</span>
-                  </td>
-                  <td>
-                    {s.config.hostname && <div className="bs-cell-primary">{s.config.hostname}</div>}
-                    {s.config.ip_address && <div className="bs-cell-secondary bs-mono">{s.config.ip_address}</div>}
-                    {!s.config.hostname && !s.config.ip_address && <span className="bs-muted">—</span>}
-                  </td>
-                  <td>
-                    {s.config.environment
-                      ? <span className={`bs-badge ${ENV_CLASS[s.config.environment] ?? ''}`}>{s.config.environment}</span>
-                      : <span className="bs-muted">—</span>}
-                  </td>
-                  <td>
-                    {s.config.criticality
-                      ? <span className={`bs-badge ${CRIT_CLASS[s.config.criticality] ?? ''}`}>{s.config.criticality}</span>
-                      : <span className="bs-muted">—</span>}
-                  </td>
-                  <td>
-                    <span className="bs-badge bs-badge--neutral">{s.config.transport}</span>
-                  </td>
-                  <td>
-                    <label className="bs-toggle bs-toggle--sm" title={s.active ? 'Désactiver' : 'Activer'}>
-                      <input type="checkbox" checked={s.active}
-                        onChange={() => toggleSource(s.id, s.active)} />
-                      <span className="bs-toggle-slider" />
-                    </label>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      </form>
+      {confirmOff && source && (
+        <Confirm title="Désactiver la source ?" danger confirmLabel="Désactiver" busy={save.isPending}
+          onCancel={() => setConfirmOff(false)}
+          onConfirm={async () => {
+            try { await sources.disable(source.id); toast.ok('Source désactivée : ses événements sont désormais refusés.'); qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['coverage'] }); onClose(); }
+            catch (err) { toast.error(err); setConfirmOff(false); }
+          }}>
+          La passerelle refusera les événements de « {source.name} » et les règles qui en dépendent seront signalées comme privées de données. La source et son historique sont conservés ; vous pourrez la réactiver.
+        </Confirm>
       )}
+    </Modal>
+  );
+}
 
-      {/* Modal */}
-      {showModal && (
-        <SourceModal
-          onClose={() => setShowModal(false)}
-          onCreated={fetchSources}
-        />
+// ── Identifiants d'ingestion ─────────────────────────────────────────────────
+
+function CredentialsModal({ source, onClose }: { source: Source; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [token, setToken] = useState<TokenCredential | null>(null);
+  const [fp, setFp] = useState('');
+  const [revoke, setRevoke] = useState<string | null>(null);
+  const [tab, setTab] = useState<'creds' | 'agent'>('creds');
+  const q = useQuery({ queryKey: ['credentials', source.id], queryFn: () => sources.credentials(source.id) });
+  const refresh = () => qc.invalidateQueries({ queryKey: ['credentials', source.id] });
+  const syslog = source.config.transport === 'syslog';
+  const active = (q.data ?? []).filter((c) => !c.revoked_at);
+
+  const gen = useMutation({ mutationFn: () => sources.newToken(source.id), onSuccess: (t) => { setToken(t); refresh(); }, onError: (e) => toast.error(e) });
+  const cert = useMutation({ mutationFn: () => sources.addCertificate(source.id, fp), onSuccess: () => { setFp(''); toast.ok('Empreinte enregistrée.'); refresh(); }, onError: (e) => toast.error(e) });
+  const rev = useMutation({ mutationFn: (cid: string) => sources.revoke(source.id, cid), onSuccess: () => { setRevoke(null); toast.ok('Identifiant révoqué.'); refresh(); }, onError: (e) => toast.error(e) });
+
+  return (
+    <Modal wide title={`Identifiants — ${source.name}`}
+      subtitle={syslog ? 'Source Syslog TLS : identifiée par l’empreinte SHA-256 de son certificat client.' : 'Source HTTPS : authentifiée par un jeton porté dans l’en-tête Authorization.'}
+      onClose={onClose} footer={<button className="btn" onClick={onClose}>Fermer</button>}>
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'creds', label: 'Identifiants' }, { value: 'agent', label: 'Raccordement de l’agent' }]} />
+      {tab === 'agent' ? <AgentGuide source={source} token={token?.token} /> : (
+      <div className="stack">
+        {token && (
+          <Notice kind="warn">
+            <div className="stack" style={{ gap: 10 }}>
+              <strong>Copiez ce jeton maintenant : il ne sera plus jamais affiché.</strong>
+              <div className="secret" style={{ wordBreak: 'break-all' }}>{token.token}</div>
+              <div className="row"><CopyButton text={token.token} label="Copier le jeton" /></div>
+              <span className="small">Les jetons précédents restent valides : révoquez-les une fois le nouveau jeton en place sur l’agent, pour ne perdre aucun événement.</span>
+            </div>
+          </Notice>
+        )}
+
+        {syslog ? (
+          <form className="stack" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); if (fp.trim()) cert.mutate(); }}>
+            <Field label="Empreinte SHA-256 du certificat client"
+              help={<>Calculée côté source avec <span className="mono">openssl x509 -noout -fingerprint -sha256 -in client.crt</span>. BaolSec ne génère ni ne conserve de clé privée.</>}>
+              <input className="input mono" value={fp} onChange={(e) => setFp(e.target.value)} placeholder="AB:CD:…  (64 caractères hexadécimaux)" />
+            </Field>
+            <div className="row"><button className="btn primary" disabled={!fp.trim() || cert.isPending}><IconPlus />Enregistrer l’empreinte</button>
+              <span className="small faint">Deux identifiants actifs au maximum par source (rotation sans coupure).</span></div>
+          </form>
+        ) : (
+          <div className="row between">
+            <span className="small muted">Deux identifiants actifs au maximum par source, pour permettre une rotation sans coupure.</span>
+            <button className="btn primary" disabled={gen.isPending || active.length >= 2} onClick={() => gen.mutate()}><IconKey />Générer un jeton</button>
+          </div>
+        )}
+
+        {q.error ? <ErrorNotice error={q.error} /> : (
+          <div className="table-wrap card">
+            <table className="table">
+              <thead><tr><th>Type</th><th>Identifiant</th><th>Créé le</th><th>État</th><th /></tr></thead>
+              <tbody>
+                {(q.data ?? []).map((c) => (
+                  <tr key={c.id} className={c.revoked_at ? 'dim' : ''}>
+                    <td>{c.credential_type === 'token' ? 'Jeton' : 'Certificat'}</td>
+                    <td className="mono small">{c.cert_fingerprint ? `${c.cert_fingerprint.slice(0, 16)}…${c.cert_fingerprint.slice(-8)}` : `•••• ${c.id.slice(0, 8)}`}</td>
+                    <td className="small nowrap">{dateTime(c.created_at)}</td>
+                    <td>{c.revoked_at ? <Badge>Révoqué le {dateTime(c.revoked_at)}</Badge> : <Badge tone="ok" dot>Actif</Badge>}</td>
+                    <td className="actions">{!c.revoked_at && <button className="btn sm danger" onClick={() => setRevoke(c.id)}>Révoquer</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!q.isLoading && !q.data?.length && <Empty title="Aucun identifiant" icon={<IconKey />}>Sans identifiant actif, la passerelle refuse les événements de cette source.</Empty>}
+          </div>
+        )}
+      </div>
       )}
-    </div>
+      {revoke && (
+        <Confirm title="Révoquer cet identifiant ?" danger confirmLabel="Révoquer" busy={rev.isPending} onCancel={() => setRevoke(null)} onConfirm={() => rev.mutate(revoke)}>
+          Les envois authentifiés avec cet identifiant seront refusés immédiatement par la passerelle. Vérifiez que l’agent utilise déjà le nouvel identifiant.
+        </Confirm>
+      )}
+    </Modal>
   );
 }

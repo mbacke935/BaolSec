@@ -1,195 +1,225 @@
-import { useParams, Link } from 'react-router-dom';
+/**
+ * Détail d'un incident (C15, EF-07/EF-08) : contexte corrélé, alertes rattachées, chronologie
+ * et actions de l'analyste. Chaque action est une commande incident_command/v1 traitée par le
+ * service Incidents ; l'écran se rafraîchit à partir de l'état réellement enregistré.
+ */
+import { useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { incidents as incidentsApi, toList } from '../api/analyst';
-import type { Alert, IncidentState, TimelineEntry } from '../api/analyst';
-import '../styles/design-system.css';
+import { incidents } from '../api/endpoints';
+import { useAuth } from '../auth/AuthContext';
+import {
+  AlertStatusBadge, Badge, Card, Empty, ErrorNotice, IncidentStateBadge, Loading, Modal, Notice, SeverityBadge,
+  useToast,
+} from '../components/ui';
+import { IconArrowLeft } from '../components/icons';
+import { refusal } from '../lib/commands';
+import { ago, dateTime, SEVERITY_HELP, TIMELINE } from '../lib/format';
+import { attachmentReason, FAMILY, timelineSummary } from '../lib/readable';
+import type { CommandResult, Incident, TimelineEntry } from '../types/api';
 
-const STATE_OPTIONS: IncidentState[] = ['OUVERT', 'EN_COURS', 'RESOLU', 'CLOS', 'FAUX_POSITIF'];
-
-const ENTRY_ICONS: Record<string, string> = {
-  ALERTE:          '⚡',
-  CHANGEMENT_ETAT: '↻',
-  COMMENTAIRE:     '💬',
-  ASSIGNATION:     '◎',
-  FERMETURE:       '✓',
-};
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString('fr-FR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
+type Dialog = null | 'close' | 'reopen';
 
 export function IncidentDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id = '' } = useParams();
+  const { user } = useAuth();
   const qc = useQueryClient();
+  const toast = useToast();
+  const isAnalyst = user?.role === 'ANALYST';
+  const [comment, setComment] = useState('');
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [reason, setReason] = useState('');
 
-  const { data: incident, isLoading } = useQuery({
-    queryKey: ['incident', id],
-    queryFn: () => incidentsApi.get(id!),
-    enabled: !!id,
-  });
-  const { data: timelineRaw = [] } = useQuery({
-    queryKey: ['timeline', id],
-    queryFn: () => incidentsApi.timeline(id!),
-    enabled: !!id,
-  });
-  const { data: incAlertsRaw = [] } = useQuery({
-    queryKey: ['incident-alerts', id],
-    queryFn: () => incidentsApi.alerts(id!),
-    enabled: !!id,
-  });
+  const inc = useQuery({ queryKey: ['incident', id], queryFn: () => incidents.get(id), refetchInterval: 20_000 });
+  const timeline = useQuery({ queryKey: ['incident', id, 'timeline'], queryFn: () => incidents.timeline(id), refetchInterval: 20_000 });
+  const linked = useQuery({ queryKey: ['incident', id, 'alerts'], queryFn: () => incidents.alerts(id), refetchInterval: 20_000 });
 
-  const timeline  = toList<TimelineEntry>(timelineRaw);
-  const incAlerts = toList<Alert>(incAlertsRaw);
-
-  const updateMut = useMutation({
-    mutationFn: (state: IncidentState) => incidentsApi.updateState(id!, state),
-    onSuccess: () => {
+  const act = useMutation({
+    mutationFn: ({ run }: { run: () => Promise<CommandResult>; ok: string }) => run(),
+    onSuccess: (res, vars) => {
+      const refused = refusal(res);
+      if (refused) toast.error(refused); else toast.ok(vars.ok);
       qc.invalidateQueries({ queryKey: ['incident', id] });
-      qc.invalidateQueries({ queryKey: ['timeline', id] });
+      qc.invalidateQueries({ queryKey: ['incidents'] });
+      qc.invalidateQueries({ queryKey: ['nav'] });
+      if (!refused) { setDialog(null); setReason(''); }
     },
+    onError: (err) => toast.error(err),
   });
 
-  if (isLoading) {
-    return <div className="bs-loading"><div className="bs-spinner" /> Chargement de l'incident…</div>;
-  }
-  if (!incident) {
-    return (
-      <div className="bs-card">
-        <div className="bs-empty">
-          <div className="bs-empty-icon">⚡</div>
-          <div className="bs-empty-text">Incident introuvable</div>
-          <Link to="/incidents" className="bs-btn bs-btn-secondary bs-btn-sm" style={{ marginTop: 12 }}>
-            ← Retour aux incidents
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  const busy = (ok: string) => act.isPending && act.variables?.ok === ok;
+
+  if (inc.error) return <><BackLink /><ErrorNotice error={inc.error} retry={() => inc.refetch()} /></>;
+  if (!inc.data) return <><BackLink /><Loading label="Chargement de l’incident…" /></>;
+  const i = inc.data;
+  const mine = i.assigned_to === user?.id;
+
+  const sendComment = () => {
+    const body = comment.trim();
+    if (!body) return;
+    act.mutate({ run: () => incidents.comment(id, body), ok: 'Commentaire ajouté.' }, { onSuccess: (r) => { if (r.result === 'acceptee') setComment(''); } });
+  };
 
   return (
     <>
-      {/* Breadcrumb + badges */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <Link to="/incidents" className="bs-btn bs-btn-secondary bs-btn-xs">← Incidents</Link>
-        <span className={`bs-badge ${incident.severity.toLowerCase()}`}>{incident.severity}</span>
-        <span className={`bs-badge ${incident.state.toLowerCase()}`}>{incident.state.replace('_', ' ')}</span>
-        <span className="bs-mono" style={{ fontSize: 11, color: 'var(--fg4)' }}>
-          #{incident.id.slice(0, 8)}
-        </span>
-      </div>
-
-      {/* Titre + contrôle d'état */}
-      <div className="bs-page-header" style={{ marginBottom: 24 }}>
-        <div style={{ flex: 1 }}>
-          <h1 className="bs-page-title" style={{ fontSize: 22 }}>{incident.title}</h1>
-          {incident.description && (
-            <p className="bs-page-sub" style={{ marginTop: 6 }}>{incident.description}</p>
-          )}
+      <BackLink />
+      <header className="page-head">
+        <div style={{ minWidth: 0 }}>
+          <div className="row" style={{ marginBottom: 10 }}>
+            <SeverityBadge value={i.severity} /><IncidentStateBadge value={i.state} />
+            <span className="faint small mono">#{i.id.slice(0, 8)}</span>
+          </div>
+          <h1 style={{ textWrap: 'balance' }}>{i.title}</h1>
+          <p>Ouvert le {dateTime(i.opened_at)} · dernière activité {ago(i.updated_at)}{i.closed_at ? ` · clos le ${dateTime(i.closed_at)}` : ''}</p>
         </div>
-        <div>
-          <label className="bs-label bs-mb-4">Modifier l'état</label>
-          <select
-            className="bs-select"
-            value={incident.state}
-            onChange={(e) => updateMut.mutate(e.target.value as IncidentState)}
-            style={{ width: 'auto' }}
-          >
-            {STATE_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s.replace('_', ' ')}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Métadonnées */}
-      <div className="bs-card bs-mb-16">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 0 }}>
-          <div style={{ padding: '0 20px 0 0', borderRight: '1px solid var(--border)' }}>
-            <div className="bs-label bs-mb-4">Ouvert le</div>
-            <div className="bs-mono" style={{ fontSize: 13, color: 'var(--fg)' }}>{formatDate(incident.opened_at)}</div>
+        {isAnalyst && (
+          <div className="actions">
+            {i.state !== 'clos' && (mine
+              ? <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ run: () => incidents.assign(id, null), ok: 'Attribution retirée.' })}>{busy('Attribution retirée.') && <span className="spinner" />}Retirer l’attribution</button>
+              : <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ run: () => incidents.assign(id, user!.id), ok: 'Incident attribué.' })}>{busy('Incident attribué.') && <span className="spinner" />}M’attribuer</button>)}
+            {i.state === 'ouvert' && <button className="btn primary" disabled={act.isPending} onClick={() => act.mutate({ run: () => incidents.setState(id, 'en_cours'), ok: 'Incident pris en charge.' })}>{busy('Incident pris en charge.') && <span className="spinner" />}Prendre en charge</button>}
+            {i.state === 'en_cours' && <button className="btn" disabled={act.isPending} onClick={() => act.mutate({ run: () => incidents.setState(id, 'ouvert'), ok: 'Incident remis en attente.' })}>{busy('Incident remis en attente.') && <span className="spinner" />}Remettre en attente</button>}
+            {i.state !== 'clos' && <button className="btn danger" onClick={() => setDialog('close')}>Clore</button>}
+            {i.state === 'clos' && <button className="btn primary" onClick={() => setDialog('reopen')}>Rouvrir</button>}
           </div>
-          <div style={{ padding: '0 20px', borderRight: '1px solid var(--border)' }}>
-            <div className="bs-label bs-mb-4">Responsable</div>
-            <div style={{ fontSize: 13, color: incident.assigned_to ? 'var(--fg)' : 'var(--fg4)' }}>
-              {incident.assigned_to ?? 'Non assigné'}
-            </div>
-          </div>
-          <div style={{ padding: '0 0 0 20px' }}>
-            <div className="bs-label bs-mb-4">Fermé le</div>
-            <div className="bs-mono" style={{ fontSize: 13, color: incident.closed_at ? 'var(--fg)' : 'var(--fg4)' }}>
-              {incident.closed_at ? formatDate(incident.closed_at) : '—'}
-            </div>
-          </div>
-        </div>
-      </div>
+        )}
+      </header>
 
-      <div className="bs-grid-2">
-        {/* Chronologie */}
-        <div className="bs-card">
-          <div className="bs-section-header">
-            <span className="bs-section-title">Chronologie</span>
-            <span className="bs-section-count">{timeline.length}</span>
-          </div>
+      {!isAnalyst && <div className="mb-16"><Notice kind="info">Consultation seule : l’instruction des incidents est réservée aux analystes.</Notice></div>}
 
-          {timeline.length === 0 ? (
-            <div className="bs-empty">
-              <div className="bs-empty-text">Aucune entrée de chronologie</div>
-            </div>
-          ) : (
-            <div className="bs-timeline">
-              {timeline.map((entry) => (
-                <div key={entry.id} className="bs-timeline-entry">
-                  <div className="bs-timeline-time">{formatDate(entry.occurred_at)}</div>
-                  <div className="bs-timeline-content">
-                    {ENTRY_ICONS[entry.entry_type] ?? '·'}{' '}
-                    {entry.entry_type.replace(/_/g, ' ')}
-                  </div>
-                  {entry.detail && Object.keys(entry.detail).length > 0 && (
-                    <div className="bs-timeline-detail">
-                      {JSON.stringify(entry.detail, null, 2)}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="grid grid-main">
+        <div className="stack">
+          {i.description && <Card title="Résumé" pad><p className="muted" style={{ whiteSpace: 'pre-wrap' }}>{i.description}</p></Card>}
 
-        {/* Alertes associées */}
-        <div className="bs-card">
-          <div className="bs-section-header">
-            <span className="bs-section-title">Alertes déclenchantes</span>
-            <span className="bs-section-count">{incAlerts.length}</span>
-          </div>
+          <Card title="Alertes rattachées" hint={`${linked.data?.length ?? i.alert_count}`}>
+            {linked.error ? <div className="card-body"><ErrorNotice error={linked.error} /></div> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Gravité</th><th>Alerte</th><th>Statut</th><th>Pourquoi dans cet incident</th><th>Déclenchée</th></tr></thead>
+                  <tbody>
+                    {(linked.data ?? []).map((a) => (
+                      <tr key={a.id}>
+                        <td><SeverityBadge value={a.severity} /></td>
+                        <td className="title-cell"><strong>{a.title}</strong><span className="mono">{a.rule_code ?? ''}</span></td>
+                        <td><AlertStatusBadge value={a.status} /></td>
+                        <td className="small muted">{attachmentReason(a.detail as Record<string, unknown>)}</td>
+                        <td className="faint nowrap" title={dateTime(a.fired_at)}>{ago(a.fired_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {linked.isLoading && <Loading />}
+                {!linked.isLoading && !linked.data?.length && <Empty title="Aucune alerte rattachée" />}
+              </div>
+            )}
+          </Card>
 
-          {incAlerts.length === 0 ? (
-            <div className="bs-empty">
-              <div className="bs-empty-text">Aucune alerte associée</div>
-            </div>
-          ) : (
-            <div className="bs-list">
-              {incAlerts.map((a) => (
-                <div
-                  key={a.id}
-                  className="bs-list-item"
-                  style={{ cursor: 'default', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}
-                >
-                  <div className="bs-flex-between" style={{ width: '100%' }}>
-                    <span className="bs-list-item-title">{a.title}</span>
-                    <span className={`bs-badge ${a.severity.toLowerCase()}`}>{a.severity}</span>
-                  </div>
-                  <div className="bs-mono" style={{ fontSize: 10, color: 'var(--fg4)' }}>
-                    {formatDate(a.fired_at)}
+          <Card title="Chronologie" hint="Corrélations, alertes, changements d’état et commentaires">
+            <div className="card-body">
+              {timeline.error ? <ErrorNotice error={timeline.error} /> : timeline.isLoading ? <Loading /> : (
+                timeline.data?.length ? <Timeline entries={timeline.data} alertTitles={Object.fromEntries((linked.data ?? []).map((x) => [x.id, x.title]))} /> : <p className="muted small">Aucune entrée.</p>
+              )}
+              {isAnalyst && (
+                <div className="stack mt-16" style={{ gap: 10 }}>
+                  <textarea className="textarea" placeholder="Ajouter un commentaire : constat, hypothèse, action menée…" maxLength={10000}
+                    value={comment} onChange={(e) => setComment(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendComment(); }} />
+                  <div className="row between">
+                    <span className="small faint">Ctrl + Entrée pour envoyer · le commentaire est horodaté et signé.</span>
+                    <button className="btn primary" disabled={!comment.trim() || act.isPending} onClick={sendComment}>{busy('Commentaire ajouté.') && <span className="spinner" />}Commenter</button>
                   </div>
                 </div>
-              ))}
+              )}
             </div>
-          )}
+          </Card>
+        </div>
+
+        <div className="stack">
+          <Card title="Prise en charge" pad>
+            <dl className="kv">
+              <dt>État</dt><dd><IncidentStateBadge value={i.state} /></dd>
+              <dt>Responsable</dt><dd>{i.assigned_to_name ?? <span className="faint">Non attribué</span>}</dd>
+              <dt>Gravité</dt><dd><SeverityBadge value={i.severity} /><div className="small faint mt-8">{SEVERITY_HELP[i.severity]}</div></dd>
+              <dt>Alertes</dt><dd>{i.alert_count}</dd>
+              <dt>Ouvert le</dt><dd>{dateTime(i.opened_at)}</dd>
+              {i.closed_at && (<><dt>Clos le</dt><dd>{dateTime(i.closed_at)}</dd></>)}
+            </dl>
+          </Card>
+          <ContextCard incident={i} />
         </div>
       </div>
+
+      {dialog && (
+        <Modal title={dialog === 'close' ? 'Clore l’incident' : 'Rouvrir l’incident'}
+          subtitle={dialog === 'close' ? 'L’incident sort de la file de traitement. Il pourra être rouvert.' : 'L’incident repasse « en cours ».'}
+          onClose={() => setDialog(null)}
+          footer={<>
+            <button className="btn ghost" onClick={() => setDialog(null)}>Annuler</button>
+            <button className={`btn ${dialog === 'close' ? 'danger' : 'primary'}`} disabled={act.isPending}
+              onClick={() => act.mutate(dialog === 'close'
+                ? { run: () => incidents.close(id, reason.trim() || undefined), ok: 'Incident clos.' }
+                : { run: () => incidents.reopen(id, reason.trim() || undefined), ok: 'Incident rouvert.' })}>{busy('Incident rouvert.') && <span className="spinner" />}
+              {act.isPending && <span className="spinner" />}{dialog === 'close' ? 'Clore' : 'Rouvrir'}
+            </button>
+          </>}>
+          <label className="field">
+            <span>{dialog === 'close' ? 'Conclusion (recommandée)' : 'Motif de réouverture'}</span>
+            <textarea className="textarea" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder={dialog === 'close' ? 'Ex. : faux positif confirmé, compte réinitialisé, adresse bloquée au pare-feu…' : 'Ex. : nouvelle activité observée sur le même compte'} />
+            <span className="help">Le texte est conservé dans la chronologie de l’incident.</span>
+          </label>
+        </Modal>
+      )}
     </>
+  );
+}
+
+function BackLink() {
+  return <Link to="/incidents" className="btn ghost sm mb-16" style={{ paddingLeft: 4 }}><IconArrowLeft /> Incidents</Link>;
+}
+
+function Timeline({ entries, alertTitles }: { entries: TimelineEntry[]; alertTitles: Record<string, string> }) {
+  return (
+    <ul className="timeline">
+      {[...entries].reverse().map((e) => {
+        const kind = TIMELINE[e.entry_type] ?? { label: e.entry_type, tone: 'neutral' as const };
+        const body = typeof e.detail?.body === 'string' ? e.detail.body : null;
+        const reason = typeof e.detail?.reason === 'string' && e.entry_type === 'status_change' ? e.detail.reason : null;
+        return (
+          <li key={e.id} className={`tone-${kind.tone}`}>
+            <div className="t-head">
+              <Badge tone={kind.tone}>{kind.label}</Badge>
+              <span className="t-time" title={dateTime(e.occurred_at)}>{dateTime(e.occurred_at)}</span>
+              {e.user_name && <span className="small muted">par <strong>{e.user_name}</strong></span>}
+            </div>
+            <div className="t-body">{e.entry_type === 'comment' ? null : timelineSummary(e.summary, e.detail, e.alert_id ? alertTitles[e.alert_id] : undefined)}</div>
+            {body && <div className="t-extra" style={{ whiteSpace: 'pre-wrap' }}>{body}</div>}
+            {reason && <div className="t-extra" style={{ whiteSpace: 'pre-wrap' }}>{reason}</div>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ContextCard({ incident }: { incident: Incident }) {
+  const m = incident.metadata ?? {};
+  const groups: [string, string[] | undefined][] = [
+    ['Utilisateurs', m.users], ['Machines', m.hosts], ['Adresses IP d’origine', m.source_ips], ['Types d’activité', m.activity_families?.map((f) => FAMILY[f] ?? f)],
+  ];
+  const any = groups.some(([, v]) => v?.length);
+  return (
+    <Card title="Ce que les alertes ont en commun" hint="Utilisateurs, machines et adresses qui relient les alertes de cet incident" pad>
+      {!any ? <p className="muted small">Aucun élément commun enregistré.</p> : (
+        <div className="stack" style={{ gap: 14 }}>
+          {groups.filter(([, v]) => v?.length).map(([label, values]) => (
+            <div key={label}>
+              <div className="small faint" style={{ marginBottom: 6 }}>{label}</div>
+              <div className="row" style={{ gap: 6 }}>{values!.map((v) => <span key={v} className="tag mono">{v}</span>)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

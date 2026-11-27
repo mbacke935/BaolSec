@@ -1,85 +1,92 @@
 /**
- * Application BaolSec — authentification + interface admin (C22) + interface analyste (C23).
- *
- * Routes publiques :  /login
- * Interface admin    (AdminLayout)   : /sources, /rules, /users
- * Interface analyste (AnalystLayout) : /, /incidents, /incidents/:id, /search, /coverage
- *
- * Toutes les routes applicatives sont protégées : sans session valide,
- * on est redirigé vers /login (plus de boucle de 401).
+ * Application BaolSec : page publique, connexion, interfaces Analyste (C23) et Administrateur (C22).
+ * Les droits sont appliqués par l'API (ES-03) ; les routes ne font que diriger chaque rôle vers ses écrans.
  */
 import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { useAuth } from './hooks/useAuth';
-import { AdminLayout } from './components/AdminLayout';
-import { AnalystLayout } from './components/AnalystLayout';
+import { AuthProvider, RequireAuth, homeFor, useAuth } from './auth/AuthContext';
+import { AppShell } from './components/AppShell';
+import { ToastProvider } from './components/ui';
+import type { UserRole } from './types/api';
 
-import { LoginPage } from './pages/LoginPage';
 import { LandingPage } from './pages/LandingPage';
+import { LoginPage } from './pages/LoginPage';
+import { DashboardPage } from './pages/DashboardPage';
+import { AlertsPage } from './pages/AlertsPage';
+import { IncidentsListPage } from './pages/IncidentsListPage';
+import { IncidentDetailPage } from './pages/IncidentDetailPage';
+import { EventsPage } from './pages/EventsPage';
+import { SearchPage } from './pages/SearchPage';
+import { CoveragePage } from './pages/CoveragePage';
+import { MonitorPage } from './pages/MonitorPage';
 import { AdminOverviewPage } from './pages/AdminOverviewPage';
 import { SourcesPage } from './pages/SourcesPage';
 import { RulesPage } from './pages/RulesPage';
 import { UsersPage } from './pages/UsersPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { IncidentsListPage } from './pages/IncidentsListPage';
-import { IncidentDetailPage } from './pages/IncidentDetailPage';
-import { SearchPage } from './pages/SearchPage';
-import { CoveragePage } from './pages/CoveragePage';
-import { AlertsPage } from './pages/AlertsPage';
-import { EventsPage } from './pages/EventsPage';
-import { MonitorPage } from './pages/MonitorPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { AuditPage } from './pages/AuditPage';
+import { DlqPage } from './pages/DlqPage';
 
-const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 30_000 } } });
+export const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 1, staleTime: 15_000, refetchOnWindowFocus: false } },
+});
 
-function Loading() {
-  return <div style={{ padding: '2rem', color: '#9aadc0', fontFamily: 'system-ui' }}>Chargement…</div>;
+const BOTH: UserRole[] = ['ADMIN', 'ANALYST'];
+
+function Screen({ roles = BOTH, children }: { roles?: UserRole[]; children: ReactNode }) {
+  return <RequireAuth roles={roles}><AppShell>{children}</AppShell></RequireAuth>;
 }
 
-/** Interface admin, protégée. */
-function Admin({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
-  if (loading) return <Loading />;
-  if (!user) return <Navigate to="/login" replace />;
-  return <AdminLayout>{children}</AdminLayout>;
+function Home() {
+  const { user } = useAuth();
+  return <Navigate to={homeFor(user?.role)} replace />;
 }
 
-/** Interface analyste, protégée. */
-function Analyst({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
-  if (loading) return <Loading />;
-  if (!user) return <Navigate to="/login" replace />;
-  return <AnalystLayout>{children}</AnalystLayout>;
+export function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/app" element={<RequireAuth><Home /></RequireAuth>} />
+
+      {/* Analyse (Analyste : traitement ; Administrateur : lecture, matrice C2 §3) */}
+      <Route path="/dashboard" element={<Screen roles={['ANALYST']}><DashboardPage /></Screen>} />
+      <Route path="/alerts" element={<Screen><AlertsPage /></Screen>} />
+      <Route path="/incidents" element={<Screen><IncidentsListPage /></Screen>} />
+      <Route path="/incidents/:id" element={<Screen><IncidentDetailPage /></Screen>} />
+      <Route path="/events" element={<Screen><EventsPage /></Screen>} />
+      <Route path="/search" element={<Screen><SearchPage /></Screen>} />
+      <Route path="/coverage" element={<Screen><CoveragePage /></Screen>} />
+      <Route path="/monitor" element={<Screen><MonitorPage /></Screen>} />
+
+      {/* Référentiel : écriture Administrateur, lecture Analyste */}
+      <Route path="/sources" element={<Screen><SourcesPage /></Screen>} />
+      <Route path="/rules" element={<Screen><RulesPage /></Screen>} />
+
+      {/* Administration */}
+      <Route path="/admin" element={<Screen roles={['ADMIN']}><AdminOverviewPage /></Screen>} />
+      <Route path="/users" element={<Screen roles={['ADMIN']}><UsersPage /></Screen>} />
+      <Route path="/settings" element={<Screen roles={['ADMIN']}><SettingsPage /></Screen>} />
+      <Route path="/audit" element={<Screen roles={['ADMIN']}><AuditPage /></Screen>} />
+      <Route path="/dlq" element={<Screen roles={['ADMIN']}><DlqPage /></Screen>} />
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }
 
 export function App() {
   return (
-    <QueryClientProvider client={qc}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-
-          {/* Interface administrateur (C22) */}
-          <Route path="/admin"   element={<Admin><AdminOverviewPage /></Admin>} />
-          <Route path="/sources" element={<Admin><SourcesPage /></Admin>} />
-          <Route path="/rules"   element={<Admin><RulesPage /></Admin>} />
-          <Route path="/users"   element={<Admin><UsersPage /></Admin>} />
-
-          {/* Interface analyste (C23) */}
-          <Route path="/dashboard"       element={<Analyst><DashboardPage /></Analyst>} />
-          <Route path="/incidents"      element={<Analyst><IncidentsListPage /></Analyst>} />
-          <Route path="/incidents/:id"  element={<Analyst><IncidentDetailPage /></Analyst>} />
-          <Route path="/alerts"         element={<Analyst><AlertsPage /></Analyst>} />
-          <Route path="/events"         element={<Analyst><EventsPage /></Analyst>} />
-          <Route path="/search"         element={<Analyst><SearchPage /></Analyst>} />
-          <Route path="/coverage"       element={<Analyst><CoveragePage /></Analyst>} />
-          <Route path="/monitor"        element={<Analyst><MonitorPage /></Analyst>} />
-
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <AuthProvider>
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <AppRoutes />
+          </BrowserRouter>
+        </AuthProvider>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

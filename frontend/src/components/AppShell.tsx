@@ -1,120 +1,136 @@
 /**
- * Shell applicatif unifié BaolSec Nexus (IA de la maquette) : une seule
- * application, sidebar à 7 vues (+ Utilisateurs pour l'administrateur),
- * barre haute avec titre/sous-titre dynamiques et recherche globale.
- * Les gardes d'authentification protègent /app ; le RBAC reste côté serveur.
+ * Coquille de l'application : barre latérale par rôle (matrice C2 §3), fil d'Ariane, session.
+ * Analyste : traite alertes et incidents, consulte événements, couverture et référentiel.
+ * Administrateur : gère utilisateurs, sources, règles, paramètres ; consulte audit et file de rejet ;
+ * lit alertes, incidents et événements sans pouvoir les traiter.
  */
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
-import logo from '../assets/logo.jpg';
+import { useState, type ReactNode } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { alerts, incidents } from '../api/endpoints';
+import { useAuth } from '../auth/AuthContext';
+import { ROLE } from '../lib/format';
+import {
+  IconAudit, IconBell, IconDashboard, IconFlame, IconInbox, IconList, IconLogout, IconMenu, IconPulse,
+  IconRadar, IconRule, IconSearch, IconServer, IconSettings, IconUsers,
+} from './icons';
+import { ActivityBar } from './ui';
 
-/* ── Recherche globale partagée avec les vues ──────────────────────────────── */
-const SearchCtx = createContext<string>('');
-export const useSearch = () => useContext(SearchCtx);
+interface NavItem { to: string; label: string; icon: ReactNode; count?: number }
+interface NavGroup { title: string; items: NavItem[] }
 
-/* ── Table titres/sous-titres par route (repris de la maquette) ────────────── */
-const META: Record<string, [string, string]> = {
-  '/app': ['Vue générale', "Vue d'ensemble de votre environnement de sécurité"],
-  '/app/events': ['Événements', 'Recherche et exploration des événements collectés'],
-  '/app/alerts': ['Alertes', 'Qualification et suivi des alertes de sécurité'],
-  '/app/incidents': ['Incidents', 'Investigation et suivi des incidents'],
-  '/app/sources': ['Sources', 'État des équipements et sources de journaux'],
-  '/app/rules': ['Détection', 'Configuration des règles de détection'],
-  '/app/monitor': ['Supervision', 'État des composants de la plateforme'],
-  '/app/users': ['Utilisateurs', 'Gestion des comptes et des rôles'],
+const TITLES: Record<string, string> = {
+  '/dashboard': 'Tableau de bord', '/alerts': 'Alertes', '/incidents': 'Incidents', '/events': 'Événements',
+  '/search': 'Recherche avancée', '/coverage': 'Couverture des sources', '/monitor': 'Supervision',
+  '/admin': "Vue d'ensemble", '/sources': 'Sources', '/rules': 'Règles de détection', '/users': 'Utilisateurs',
+  '/settings': 'Paramètres', '/audit': "Journal d'audit", '/dlq': 'File de rejet',
 };
 
-const NAV: Array<{ icon: string; label: string; path: string }> = [
-  { icon: '⌂', label: 'Vue générale', path: '/app' },
-  { icon: '▤', label: 'Événements', path: '/app/events' },
-  { icon: '♧', label: 'Alertes', path: '/app/alerts' },
-  { icon: '◈', label: 'Incidents', path: '/app/incidents' },
-  { icon: '⌘', label: 'Sources', path: '/app/sources' },
-  { icon: '◎', label: 'Détection', path: '/app/rules' },
-  { icon: '◷', label: 'Supervision', path: '/app/monitor' },
-];
-
-function titleFor(pathname: string): [string, string] {
-  if (pathname.startsWith('/app/incidents/')) return ['Incident', "Détail et chronologie de l'incident"];
-  return META[pathname] ?? META['/app'];
+function initials(name: string): string {
+  const parts = name.replace(/@.*/, '').split(/[.\s_-]+/).filter(Boolean);
+  return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toUpperCase();
 }
 
-function Loading() {
-  return <div style={{ padding: '2rem', color: 'var(--muted)', fontFamily: 'Inter' }}>Chargement…</div>;
-}
-
-export function AppShell() {
-  const { user, loading, logout } = useAuth();
-  const location = useLocation();
+export function AppShell({ children }: { children: ReactNode }) {
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [query, setQuery] = useState('');
-
-  // La recherche se réinitialise à chaque changement de vue (comme la maquette).
-  useEffect(() => { setQuery(''); }, [location.pathname]);
-
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
   const isAdmin = user?.role === 'ADMIN';
-  const nav = useMemo(
-    () => (isAdmin ? [...NAV, { icon: '⚙', label: 'Utilisateurs', path: '/app/users' }] : NAV),
-    [isAdmin],
-  );
 
-  if (loading) return <Loading />;
-  if (!user) return <Navigate to="/login" replace />;
+  const newAlerts = useQuery({
+    queryKey: ['nav', 'alerts-new'], queryFn: () => alerts.list({ status: 'nouvelle', limit: 200 }),
+    refetchInterval: 30_000, enabled: !!user,
+  });
+  const activeIncidents = useQuery({
+    queryKey: ['nav', 'incidents-active'], queryFn: () => incidents.list({ active_only: true, limit: 200 }),
+    refetchInterval: 30_000, enabled: !!user,
+  });
 
-  const [title, sub] = titleFor(location.pathname);
-  const active = (path: string) =>
-    path === '/app' ? location.pathname === '/app' : location.pathname.startsWith(path);
+  const analyse: NavItem[] = [
+    { to: '/alerts', label: 'Alertes', icon: <IconBell />, count: newAlerts.data?.length },
+    { to: '/incidents', label: 'Incidents', icon: <IconFlame />, count: activeIncidents.data?.length },
+    { to: '/events', label: 'Événements', icon: <IconList /> },
+    { to: '/search', label: 'Recherche avancée', icon: <IconSearch /> },
+  ];
+  const surveillance: NavItem[] = [
+    { to: '/coverage', label: 'Couverture des sources', icon: <IconRadar /> },
+    { to: '/monitor', label: 'Supervision', icon: <IconPulse /> },
+  ];
+  const groups: NavGroup[] = isAdmin
+    ? [
+        { title: 'Administration', items: [
+          { to: '/admin', label: "Vue d'ensemble", icon: <IconDashboard /> },
+          { to: '/sources', label: 'Sources', icon: <IconServer /> },
+          { to: '/rules', label: 'Règles de détection', icon: <IconRule /> },
+          { to: '/users', label: 'Utilisateurs', icon: <IconUsers /> },
+          { to: '/settings', label: 'Paramètres', icon: <IconSettings /> },
+        ] },
+        { title: 'Traçabilité', items: [
+          { to: '/audit', label: "Journal d'audit", icon: <IconAudit /> },
+          { to: '/dlq', label: 'File de rejet', icon: <IconInbox /> },
+        ] },
+        { title: 'Consultation', items: [...analyse.map((i) => ({ ...i, count: undefined })), ...surveillance] },
+      ]
+    : [
+        { title: 'Analyse', items: [{ to: '/dashboard', label: 'Tableau de bord', icon: <IconDashboard /> }, ...analyse] },
+        { title: 'Surveillance', items: surveillance },
+        { title: 'Référentiel', items: [
+          { to: '/sources', label: 'Sources', icon: <IconServer /> },
+          { to: '/rules', label: 'Règles de détection', icon: <IconRule /> },
+        ] },
+      ];
+
+  const section = '/' + (location.pathname.split('/')[1] ?? '');
+  const title = TITLES[section] ?? 'BaolSec';
+  const sub = location.pathname.startsWith('/incidents/') ? 'Détail' : null;
+
+  async function onLogout() {
+    await logout();
+    navigate('/login', { replace: true });
+  }
 
   return (
-    <SearchCtx.Provider value={query}>
-      <div className="app-shell">
-        <aside className="side">
-          <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
-            <img src={logo} alt="BaolSec" />
-            <span>BaolSec</span>
-          </a>
-          <div className="side-label">ESPACE SOC</div>
-          {nav.map((n) => (
-            <button
-              key={n.path}
-              className={`navlink${active(n.path) ? ' active' : ''}`}
-              data-icon={n.icon}
-              onClick={() => navigate(n.path)}
-            >
-              <span className="lbl-txt">{n.icon}　{n.label}</span>
-            </button>
+    <div className={`shell ${open ? 'nav-open' : ''}`}>
+      {open && <div className="scrim" onClick={() => setOpen(false)} />}
+      <aside className="sidebar" aria-label="Navigation principale">
+        <div className="sidebar__brand">
+          <img className="brand-mark" src="/assets/logo-mark.png" alt="" />
+          <div className="brand-name">Baol<span>Sec</span></div>
+          <span className="brand-role">{isAdmin ? 'Admin' : 'SOC'}</span>
+        </div>
+        <nav className="sidebar__nav" onClick={() => setOpen(false)}>
+          {groups.map((g) => (
+            <div key={g.title}>
+              <div className="nav-section">{g.title}</div>
+              {g.items.map((item) => (
+                <NavLink key={item.to} to={item.to} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                  {item.icon}<span>{item.label}</span>
+                  {item.count ? <span key={item.count} className="nav-count" aria-label={`${item.count} à traiter`}>{item.count > 99 ? '99+' : item.count}</span> : null}
+                </NavLink>
+              ))}
+            </div>
           ))}
-          <div className="user">
-            <div className="uname">{user.email}</div>
-            <div className="urole">{isAdmin ? 'Administrateur' : 'Analyste'}</div>
-            <div className="ulinks">
-              <button onClick={() => navigate('/')}>← Site</button>
-              <button onClick={() => navigate('/login')}>Changer de rôle</button>
-              <button onClick={logout}>Déconnexion</button>
-            </div>
+        </nav>
+        <div className="sidebar__user">
+          <div className="avatar" aria-hidden>{initials(user?.username ?? user?.email ?? '?')}</div>
+          <div className="who">
+            <strong title={user?.email ?? ''}>{user?.username}</strong>
+            <span>{user ? ROLE[user.role] : ''}</span>
           </div>
-        </aside>
-
-        <main className="main">
-          <div className="app-top">
-            <div className="app-title">
-              <h2>{title}</h2>
-              <p>{sub}</p>
-            </div>
-            <div className="top-right">
-              <input
-                className="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="⌕  Rechercher dans la vue…"
-              />
-              <button className="pill" onClick={() => navigate('/')}>← Site</button>
-            </div>
-          </div>
-          <Outlet />
-        </main>
+          <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={onLogout} title="Se déconnecter" aria-label="Se déconnecter"><IconLogout /></button>
+        </div>
+      </aside>
+      <div className="main">
+        <ActivityBar />
+        <div className="topbar">
+          <button className="btn ghost icon menu-toggle" onClick={() => setOpen(true)} aria-label="Ouvrir le menu"><IconMenu /></button>
+          <div className="crumbs">{isAdmin ? 'Administration' : 'Analyse'} · <b>{title}</b>{sub && <> · {sub}</>}</div>
+          <div className="spacer" />
+          <span className="small faint nowrap session">Session : {user?.email ?? user?.username}</span>
+        </div>
+        <main className="content"><div key={location.pathname} className="page-enter">{children}</div></main>
       </div>
-    </SearchCtx.Provider>
+    </div>
   );
 }

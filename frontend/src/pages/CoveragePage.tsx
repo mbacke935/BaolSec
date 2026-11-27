@@ -1,152 +1,124 @@
-import type { CSSProperties } from 'react';
+/**
+ * Couverture des sources (EF-09, C14) : état de chaque source, volumes reçus et traités,
+ * règles de détection privées de données et historique des changements d'état.
+ */
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { coverage as coverageApi, toList, type CoverageState } from '../api/analyst';
-import '../styles/design-system.css';
+import { coverage } from '../api/endpoints';
+import {
+  Badge, Card, CoverageBadge, Empty, ErrorNotice, LoadingRows, PageHeader, Segmented, Stat,
+} from '../components/ui';
+import { IconRadar } from '../components/icons';
+import { ago, CAUSE, count, COVERAGE, dateTime, duration, SOURCE_TYPE } from '../lib/format';
+import { coverageReason } from '../lib/readable';
+import type { Coverage, CoverageStateName } from '../types/api';
 
-function NormBar({ ratio }: { ratio: number }) {
-  const pct   = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
-  const color = pct > 90 ? 'var(--success)' : pct > 60 ? 'var(--warn)' : 'var(--danger)';
-  return (
-    <div>
-      <div className="bs-flex-between bs-mb-4">
-        <span className="bs-text-xs bs-text-muted">Taux de normalisation</span>
-        <span className="bs-text-xs" style={{ color, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{pct}%</span>
-      </div>
-      <div className="bs-progress-bar">
-        <div className="bs-progress-fill" style={{ width: `${pct}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
-
-function stateClass(s: string) {
-  if (s === 'ACTIVE')        return 'active';
-  if (s === 'SILENCIEUSE')   return 'silencieuse';
-  if (s === 'FLUX_INCOMPLET')return 'flux_incomplet';
-  return 'neutral';
-}
-
-function stateLabel(s: string) {
-  const labels: Record<string, string> = {
-    ACTIVE:        'Active',
-    SILENCIEUSE:   'Silencieuse',
-    FLUX_INCOMPLET:'Flux incomplet',
-    DESACTIVEE:    'Désactivée',
-    INCONNUE:      'Inconnue',
-  };
-  return labels[s] ?? s;
-}
+type View = 'all' | 'problems';
+const ORDER: CoverageStateName[] = ['SILENCIEUSE', 'FLUX_INCOMPLET', 'INCONNUE', 'ACTIVE', 'DESACTIVEE'];
 
 export function CoveragePage() {
-  const { data: listRaw, isLoading } = useQuery({
-    queryKey: ['coverage'],
-    queryFn: () => coverageApi.list(),
-    refetchInterval: 30_000,
-  });
+  const [view, setView] = useState<View>('all');
+  const q = useQuery({ queryKey: ['coverage'], queryFn: coverage.list, refetchInterval: 30_000 });
+  const hist = useQuery({ queryKey: ['coverage', 'history'], queryFn: () => coverage.history(), refetchInterval: 60_000 });
 
-  const list = toList<CoverageState>(listRaw);
-
-  const active      = list.filter((c) => c.state === 'ACTIVE').length;
-  const degraded    = list.filter((c) => ['SILENCIEUSE', 'FLUX_INCOMPLET'].includes(c.state)).length;
-  const totalEvents = list.reduce((acc, c) => acc + (c.received_count ?? 0), 0);
+  const items = [...(q.data?.items ?? [])].sort((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state) || a.source_name.localeCompare(b.source_name));
+  const n = (s: CoverageStateName) => items.filter((c) => c.state === s).length;
+  const problems = items.filter((c) => c.state === 'SILENCIEUSE' || c.state === 'FLUX_INCOMPLET');
+  const affected = new Set(items.flatMap((c) => c.affected_rules.map((r) => r.rule_id))).size;
+  const shown = view === 'problems' ? problems : items;
 
   return (
     <>
-      <div className="bs-page-header">
-        <div>
-          <h1 className="bs-page-title">Couverture <span>sources</span></h1>
-          <p className="bs-page-sub">Actualisation automatique toutes les 30 secondes</p>
-        </div>
+      <PageHeader title="Couverture des sources"
+        subtitle="Une source silencieuse ou au flux incomplet crée un angle mort : les règles qui en dépendent ne peuvent plus rien détecter. Cette page indique lesquelles." />
+
+      <div className="grid grid-4 mb-16">
+        <Stat label="Sources actives" value={q.isLoading ? '…' : n('ACTIVE')} tone={n('ACTIVE') ? 'ok' : undefined} sub={`sur ${items.length - n('DESACTIVEE')} source(s) en service`} />
+        <Stat label="Silencieuses" value={q.isLoading ? '…' : n('SILENCIEUSE')} tone={n('SILENCIEUSE') ? 'critical' : 'ok'} sub="Aucun événement au-delà du seuil" />
+        <Stat label="Flux incomplet" value={q.isLoading ? '…' : n('FLUX_INCOMPLET')} tone={n('FLUX_INCOMPLET') ? 'warn' : 'ok'} sub="Reçus mais non traités" />
+        <Stat label="Règles privées de données" value={q.isLoading ? '…' : affected} tone={affected ? 'warn' : 'ok'} sub="Détection dégradée" />
       </div>
 
-      {/* KPIs */}
-      <div className="bs-kpi-grid">
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--success)' } as CSSProperties}>
-          <div className="bs-kpi-label">Sources actives</div>
-          <div className="bs-kpi-value bs-glow-accent">{isLoading ? '…' : active}</div>
-          <div className="bs-kpi-sub">Flux en réception nominale</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--warn)' } as CSSProperties}>
-          <div className="bs-kpi-label">Sources dégradées</div>
-          <div className={`bs-kpi-value ${degraded > 0 ? 'bs-glow-warn' : ''}`}>
-            {isLoading ? '…' : degraded}
+      {q.error ? <ErrorNotice error={q.error} retry={() => q.refetch()} /> : (
+        <>
+          <div className="section-title">
+            <h2>Sources</h2>
+            <Segmented<View> value={view} onChange={setView} options={[
+              { value: 'all', label: 'Toutes', count: items.length }, { value: 'problems', label: 'À surveiller', count: problems.length },
+            ]} />
           </div>
-          <div className="bs-kpi-sub">Silencieuses ou flux incomplets</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent2)' } as CSSProperties}>
-          <div className="bs-kpi-label">Total sources</div>
-          <div className="bs-kpi-value">{isLoading ? '…' : list.length}</div>
-          <div className="bs-kpi-sub">Sources configurées</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent)' } as CSSProperties}>
-          <div className="bs-kpi-label">Événements reçus</div>
-          <div className="bs-kpi-value" style={{ fontSize: 28 }}>
-            {isLoading ? '…' : totalEvents.toLocaleString('fr-FR')}
+          {q.isLoading ? <div className="card card-body"><div className="skeleton" /></div> : shown.length === 0 ? (
+            <Card><Empty title={view === 'problems' ? 'Aucune source à surveiller' : 'Aucune source déclarée'} icon={<IconRadar />}>
+              {view === 'problems' ? 'Toutes les sources en service remontent leurs événements.' : 'Un administrateur déclare les sources dans Référentiel › Sources.'}
+            </Empty></Card>
+          ) : (
+            <div className="grid grid-3 mb-16">{shown.map((c) => <SourceCard key={c.source_id} c={c} />)}</div>
+          )}
+        </>
+      )}
+
+      <Card title="Historique des changements d’état" hint="100 derniers changements">
+        {hist.error ? <div className="card-body"><ErrorNotice error={hist.error} /></div> : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Date</th><th>Source</th><th>Changement</th><th>Motif</th></tr></thead>
+              {hist.isLoading ? <LoadingRows cols={4} rows={4} /> : (
+                <tbody>
+                  {(hist.data ?? []).map((h) => (
+                    <tr key={h.id}>
+                      <td className="mono small nowrap">{dateTime(h.changed_at)}</td>
+                      <td>{h.source_name}</td>
+                      <td className="nowrap">{h.from_state === h.to_state
+                        ? <><span className="small faint">Premier état :</span> <CoverageBadge value={h.to_state} /></>
+                        : <><CoverageBadge value={h.from_state} /> <span className="faint">→</span> <CoverageBadge value={h.to_state} /></>}</td>
+                      <td className="small muted">{coverageReason(h.reason)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              )}
+            </table>
+            {!hist.isLoading && !hist.data?.length && <Empty title="Aucun changement enregistré" />}
           </div>
-          <div className="bs-kpi-sub">Cumul toutes sources</div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+function SourceCard({ c }: { c: Coverage }) {
+  const ratio = c.received_count ? Math.min(100, Math.round((c.normalized_count / c.received_count) * 100)) : null;
+  const tone = c.state === 'SILENCIEUSE' ? 'critical' : c.state === 'FLUX_INCOMPLET' ? 'warn' : '';
+  return (
+    <section className="card card-pad" style={tone ? { borderColor: `var(--${tone === 'critical' ? 'critical' : 'warn'})` } : undefined}>
+      <div className="row between" style={{ alignItems: 'flex-start' }}>
+        <div style={{ minWidth: 0 }}>
+          <h3 className="truncate" style={{ fontSize: 15, fontWeight: 600 }}>{c.source_name}</h3>
+          <div className="small faint">{c.source_type ? SOURCE_TYPE[c.source_type] : 'Type inconnu'}</div>
         </div>
+        <CoverageBadge value={c.state} />
       </div>
-
-      {isLoading ? (
-        <div className="bs-loading"><div className="bs-spinner" /> Chargement de la couverture…</div>
-      ) : list.length === 0 ? (
-        <div className="bs-card">
-          <div className="bs-empty">
-            <div className="bs-empty-icon">◎</div>
-            <div className="bs-empty-text">Aucune source configurée</div>
-            <div className="bs-empty-sub">Ajoutez des sources depuis l'administration</div>
-          </div>
-        </div>
-      ) : (
-        <div className="bs-source-grid">
-          {list.map((c) => {
-            const normRatio = c.received_count > 0 ? c.normalized_count / c.received_count : 0;
-            return (
-              <div key={c.source_id} className="bs-card bs-card-hover">
-                <div className="bs-flex-between bs-mb-16">
-                  <span style={{ fontWeight: 600, color: 'var(--fg)', fontSize: 14 }}>
-                    {c.source_name}
-                  </span>
-                  <span className={`bs-badge ${stateClass(c.state)}`}>{stateLabel(c.state)}</span>
-                </div>
-
-                <NormBar ratio={normRatio} />
-
-                <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <div className="bs-detail-row">
-                    <span className="bs-detail-key">Événements reçus</span>
-                    <span className="bs-mono" style={{ fontSize: 12 }}>
-                      {c.received_count.toLocaleString('fr-FR')}
-                    </span>
-                  </div>
-                  <div className="bs-detail-row">
-                    <span className="bs-detail-key">Normalisés</span>
-                    <span className="bs-mono" style={{ fontSize: 12 }}>
-                      {c.normalized_count.toLocaleString('fr-FR')}
-                    </span>
-                  </div>
-                  <div className="bs-detail-row">
-                    <span className="bs-detail-key">Dernière réception</span>
-                    <span className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)' }}>
-                      {c.last_received_at
-                        ? new Date(c.last_received_at).toLocaleString('fr-FR')
-                        : '—'}
-                    </span>
-                  </div>
-                  {c.last_processed_at && (
-                    <div className="bs-detail-row">
-                      <span className="bs-detail-key">Dernier traitement</span>
-                      <span className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)' }}>
-                        {new Date(c.last_processed_at).toLocaleString('fr-FR')}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+      <p className="small muted mt-8">{COVERAGE[c.state].help}</p>
+      <dl className="kv mt-16" style={{ fontSize: 13 }}>
+        <dt>Dernier événement</dt><dd title={dateTime(c.last_received_at)}>{ago(c.last_received_at)}</dd>
+        <dt>Dans cet état</dt><dd title={dateTime(c.state_since)}>{c.state_since ? ago(c.state_since).replace('il y a ', 'depuis ') : '—'}</dd>
+        <dt>Seuil de silence</dt><dd>{duration(c.silence_threshold_s)}</dd>
+        <dt>Reçus / traités</dt><dd>{count(c.received_count)} / {count(c.normalized_count)}</dd>
+      </dl>
+      {ratio != null && (
+        <div className="mt-8">
+          <div className={`bar ${ratio < 90 ? 'warn' : ''}`}><i style={{ width: `${ratio}%` }} /></div>
+          <div className="small faint mt-8">{ratio} % des événements reçus ont été normalisés</div>
         </div>
       )}
-    </>
+      {c.affected_rules.length > 0 && (
+        <div className="mt-16">
+          <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>{c.affected_rules.length} règle(s) privée(s) de données</div>
+          <div className="row" style={{ gap: 6 }}>
+            {c.affected_rules.slice(0, 6).map((r) => <Badge key={r.rule_id} tone="warn" title={`Cause : ${CAUSE[r.cause] ?? r.cause} depuis ${dateTime(r.since)}`}>{r.name}</Badge>)}
+            {c.affected_rules.length > 6 && <span className="small faint">+{c.affected_rules.length - 6}</span>}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

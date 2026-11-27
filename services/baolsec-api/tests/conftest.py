@@ -1,7 +1,12 @@
 """Fixtures partagées pour les tests de l'API BaolSec (C20)."""
 from __future__ import annotations
 
+import os
 import uuid
+
+# Valeurs factices : main.py lit la configuration à l'import ; aucun test ne se connecte réellement.
+os.environ.setdefault("POSTGRES_DSN", "postgresql://test:test@localhost:5432/test")
+os.environ.setdefault("JWT_SECRET", "test-secret-key-1234567890abcdef")
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch

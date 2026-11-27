@@ -1,296 +1,176 @@
 /**
- * BaolSec Landing Page — Design luxe & moderne
- * Glassmorphism · Animations · Transparences · Images cybersécurité
+ * Page d'accueil publique : ce que fait BaolSec, comment, et pour qui.
+ * Contenu factuel, tiré du cadrage et de la conception : aucun chiffre ni client inventé.
+ * Aucune ressource externe (polices et images servies par la plateforme elle-même).
  */
-import { useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { homeFor, useAuth } from '../auth/AuthContext';
+import {
+  IconAudit, IconBell, IconFlame, IconLayers, IconLock, IconPulse, IconRadar, IconRule, IconSearch, IconServer, IconShield, IconUsers,
+} from '../components/icons';
 import './LandingPage.css';
 
+const PIPELINE = [
+  { n: '01', title: 'Collecte', text: 'Les agents Fluent Bit envoient en HTTPS avec un jeton par source ; les équipements réseau en Syslog sur TLS. Chaque lot est authentifié et horodaté à la réception.' },
+  { n: '02', title: 'Normalisation', text: 'Chaque ligne est analysée et convertie au format ECS : utilisateur, adresse IP, hôte, action et résultat se lisent de la même façon quelle que soit la source.' },
+  { n: '03', title: 'Détection', text: 'Des règles YAML versionnées évaluent chaque événement : correspondance simple ou seuil sur une fenêtre de temps, regroupé par utilisateur, IP ou hôte.' },
+  { n: '04', title: 'Corrélation', text: 'Les alertes qui partagent un utilisateur, une adresse ou un hôte dans la même fenêtre sont regroupées en un incident unique, avec la justification du regroupement.' },
+  { n: '05', title: 'Investigation', text: 'L’analyste prend l’incident en charge, consulte les événements à l’origine de chaque alerte, commente et clôt avec une conclusion tracée.' },
+];
+
 const FEATURES = [
-  {
-    ico: '⌁',
-    h: 'Collecte centralisée',
-    p: 'Rassemblez les journaux et événements issus de vos serveurs, postes et équipements réseau en temps réel.',
-    tag: 'INGESTION',
-  },
-  {
-    ico: '◎',
-    h: 'Détection des menaces',
-    p: 'Identifiez les activités suspectes grâce à des règles de détection configurables et du machine learning.',
-    tag: 'DETECTION',
-  },
-  {
-    ico: '◈',
-    h: 'Corrélation & incidents',
-    p: 'Regroupez les alertes liées et facilitez le travail d\'investigation avec une vue chronologique complète.',
-    tag: 'CORRELATION',
-  },
-  {
-    ico: '▤',
-    h: 'Supervision temps réel',
-    p: 'Suivez l\'état des sources et des composants qui assurent le traitement de votre infrastructure.',
-    tag: 'MONITORING',
-  },
-  {
-    ico: '⌕',
-    h: 'Investigation forensique',
-    p: 'Explorez les événements, les preuves et le contexte associé à chaque alerte avec un moteur de recherche puissant.',
-    tag: 'INVESTIGATION',
-  },
-  {
-    ico: '◷',
-    h: 'Traçabilité complète',
-    p: 'Conservez une lecture chronologique des actions et de l\'évolution des incidents pour l\'audit et la conformité.',
-    tag: 'AUDIT',
-  },
-];
-
-const APPROACH = [
-  {
-    h: 'Pour les analystes SOC',
-    p: 'Alertes, investigations, incidents et chronologie dans un espace de travail cohérent et ergonomique.',
-    img: '/assets/Gemini_Generated_Image_yfy78kyfy78kyfy7(1).jpeg',
-  },
-  {
-    h: 'Pour les équipes sécurité',
-    p: 'Gestion centralisée des sources, des règles de détection, des utilisateurs et de la supervision technique.',
-    img: '/assets/Gemini_Generated_Image_yfy78kyfy78kyfy7(4).jpeg',
-  },
-  {
-    h: 'Pour les organisations',
-    p: 'Une visibilité consolidée sur l\'ensemble des signaux de sécurité avec reporting et conformité intégrés.',
-    img: '/assets/Luxury_dark_cybersecurity_SIEM_hero_background__deep_navy_bl.png',
-  },
-];
-
-const LOG_LINES = [
-  { ts: '03:47:12.441', lvl: 'CRIT', cls: 'lvl-crit', msg: 'Brute-force SSH détecté — <em>192.168.1.47</em> → <span class="hi">10.0.0.3</span> (248 tentatives/min)' },
-  { ts: '03:47:13.002', lvl: 'WARN', cls: 'lvl-warn', msg: 'Exfiltration suspecte — <em>proc:chrome</em> → <span class="hi">external:443</span> 48 MB' },
-  { ts: '03:47:14.118', lvl: 'INFO', cls: 'lvl-info', msg: 'Règle SIGMA <em>T1110.001</em> corrélée — incident <span class="hi">#INC-2847</span> créé' },
-  { ts: '03:47:15.330', lvl: 'OK',   cls: 'lvl-ok',   msg: 'Agent <em>linux-prod-07</em> — flux normalisé, <span class="hi">3 412</span> événements indexés' },
-  { ts: '03:47:16.891', lvl: 'CRIT', cls: 'lvl-crit', msg: 'Lateral movement — <em>WIN-DC01</em> → <span class="hi">WIN-SRV04</span> Pass-the-Hash' },
-  { ts: '03:47:17.204', lvl: 'INFO', cls: 'lvl-info', msg: 'Couverture MITRE ATT&CK — <span class="hi">67 %</span> des tactiques surveillées' },
+  { icon: IconBell, title: 'Alertes expliquées', text: 'Chaque alerte renvoie aux événements qui l’ont déclenchée et au message d’origine, tel que reçu.' },
+  { icon: IconFlame, title: 'Incidents corrélés', text: 'Moins de bruit : une attaque par force brute suivie d’une connexion réussie forme un seul dossier, pas dix alertes.' },
+  { icon: IconRadar, title: 'Couverture des sources', text: 'Une source qui se tait est signalée, avec la liste des règles qui ne peuvent plus rien détecter.' },
+  { icon: IconSearch, title: 'Recherche d’événements', text: 'Par période, source, utilisateur, adresse IP ou hôte, et en syntaxe Lucene pour les requêtes avancées.' },
+  { icon: IconRule, title: 'Règles versionnées', text: 'Format YAML validé par le serveur ; chaque modification crée une version consultable et attribuée.' },
+  { icon: IconPulse, title: 'Supervision intégrée', text: 'État de chaque service, retard des files de messages et file de rejet visibles depuis l’interface.' },
 ];
 
 export function LandingPage() {
-  const nav = useNavigate();
-  const navRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    // Nav scroll effect
-    const onScroll = () => {
-      if (navRef.current) {
-        navRef.current.classList.toggle('scrolled', window.scrollY > 40);
-      }
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-
-    // Scroll reveal
-    const observer = new IntersectionObserver(
-      (entries) => entries.forEach((e) => e.target.classList.toggle('visible', e.isIntersecting)),
-      { threshold: 0.12 }
-    );
-    document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
-
-    // Animated counters
-    const counters = document.querySelectorAll<HTMLElement>('[data-count]');
-    counters.forEach((el) => {
-      const target = parseFloat(el.dataset.count || '0');
-      const suffix = el.dataset.suffix || '';
-      const decimals = el.dataset.dec ? parseInt(el.dataset.dec) : 0;
-      let start = 0;
-      const duration = 2000;
-      const step = (timestamp: number) => {
-        if (!start) start = timestamp;
-        const progress = Math.min((timestamp - start) / duration, 1);
-        const val = target * (1 - Math.pow(1 - progress, 3));
-        el.textContent = val.toFixed(decimals) + suffix;
-        if (progress < 1) requestAnimationFrame(step);
-      };
-      const obs2 = new IntersectionObserver(([entry]) => {
-        if (entry.isIntersecting) { requestAnimationFrame(step); obs2.disconnect(); }
-      });
-      obs2.observe(el);
-    });
-
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      observer.disconnect();
-    };
-  }, []);
+  const { user } = useAuth();
+  const target = user ? homeFor(user.role) : '/login';
+  const cta = user ? 'Ouvrir la console' : 'Se connecter';
 
   return (
     <div className="lp">
-      {/* ── NAV ── */}
-      <nav className="lp-nav" ref={navRef}>
-        <div className="lp-nav-logo">
-          <img src="/assets/logo.jpg" alt="BaolSec" />
+      <header className="lp-nav">
+        <div className="lp-wrap lp-nav__in">
+          <Link to="/" className="lp-brand"><img src="/assets/logo-mark.png" alt="" /><span>Baol<b>Sec</b></span></Link>
+          <nav className="lp-nav__links" aria-label="Sections">
+            <a href="#chaine">Fonctionnement</a><a href="#fonctions">Fonctions</a><a href="#roles">Rôles</a><a href="#securite">Sécurité</a>
+          </nav>
+          <Link to={target} className="btn primary">{cta}</Link>
         </div>
-        <div className="lp-nav-links">
-          <a href="#plateforme">Plateforme</a>
-          <a href="#fonctionnalites">Fonctionnalités</a>
-          <a href="#approche">Notre approche</a>
-        </div>
-        <div className="lp-nav-actions">
-          <button className="lp-btn-ghost" onClick={() => nav('/login')}>Se connecter</button>
-          <button className="lp-btn-cta" onClick={() => nav('/login')}>Accéder à la plateforme →</button>
-        </div>
-      </nav>
+      </header>
 
-      {/* ── HERO ── */}
       <section className="lp-hero">
-        <div className="lp-hero-bg" style={{ overflow: "hidden" }}>
-          <img src="/assets/Futuristic_global_threat_map_visualization__dark_background_.png" alt="" className="lp-hero-img" />
-          <div className="lp-orb lp-orb-1" />
-          <div className="lp-orb lp-orb-2" />
-          <div className="lp-orb lp-orb-3" />
-          <div className="lp-grid" />
-        </div>
-        <div className="lp-hero-content">
-          <div className="lp-badge">
-            <span className="lp-badge-dot" />
-            CYBERSÉCURITÉ · SIEM DISTRIBUÉ · DÉTECTION TEMPS RÉEL
-          </div>
-          <h1 className="lp-hero-title">
-            Votre sécurité.<br />
-            <span className="lp-gradient-text">En pleine maîtrise.</span>
-          </h1>
-          <p className="lp-hero-sub">
-            BaolSec centralise vos événements de sécurité, détecte les comportements suspects
-            et vous aide à piloter vos incidents depuis une interface unique et puissante.
+        <div className="lp-wrap lp-hero__in">
+          <p className="lp-kicker">SIEM distribué · auto-hébergé</p>
+          <h1>Voir ce qui se passe sur votre système d’information, <span>et ce que vous ne voyez plus.</span></h1>
+          <p className="lp-lead">
+            BaolSec centralise les journaux de vos serveurs, postes, pare-feu et applications, détecte les comportements
+            suspects, les regroupe en incidents et vous prévient quand une source cesse d’émettre.
           </p>
-          <div className="lp-hero-actions">
-            <button className="lp-btn-primary" onClick={() => nav('/login')}>
-              <span>Accéder à la plateforme</span>
-              <span className="lp-btn-arrow">→</span>
-            </button>
-            <button className="lp-btn-secondary" onClick={() => document.getElementById('fonctionnalites')?.scrollIntoView({ behavior: 'smooth' })}>
-              Voir les fonctionnalités
-            </button>
+          <div className="lp-hero__cta">
+            <Link to={target} className="btn primary lg">{cta}</Link>
+            <a href="#chaine" className="btn lg">Comment ça marche</a>
           </div>
-          <div className="lp-hero-stats">
-            {[
-              { num: '24.8', suffix: 'M', label: 'Événements supervisés', dec: '1' },
-              { num: '99.97', suffix: '%', label: 'Disponibilité garantie', dec: '2' },
-              { num: '< 2', suffix: 's', label: 'Latence de détection', dec: '' },
-              { num: '67', suffix: '%', label: 'Couverture MITRE ATT&CK', dec: '' },
-            ].map((s, i) => (
-              <div className="lp-stat" key={i}>
-                <div className="lp-stat-num">
-                  {s.dec !== undefined && s.num !== '< 2' ? (
-                    <><span data-count={s.num} data-suffix={s.suffix} data-dec={s.dec}>0</span></>
-                  ) : (
-                    <>{s.num}<span style={{ color: 'var(--lp-accent)' }}>{s.suffix}</span></>
-                  )}
-                </div>
-                <div className="lp-stat-label">{s.label}</div>
-              </div>
+          <ul className="lp-hero__facts">
+            <li><IconServer />Linux, Windows, pare-feu, applications web</li>
+            <li><IconLayers />Événements normalisés au format ECS</li>
+            <li><IconLock />Données hébergées chez vous</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="chaine" className="lp-section">
+        <div className="lp-wrap">
+          <div className="lp-head">
+            <p className="lp-kicker">Fonctionnement</p>
+            <h2>Du journal brut à l’incident instruit</h2>
+            <p>Cinq étapes, chacune assurée par un service indépendant relié aux autres par une file de messages persistante : si un service s’arrête, les messages attendent au lieu d’être perdus.</p>
+          </div>
+          <ol className="lp-pipeline">
+            {PIPELINE.map((s) => (
+              <li key={s.n}><span className="lp-pipeline__n">{s.n}</span><h3>{s.title}</h3><p>{s.text}</p></li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section id="fonctions" className="lp-section lp-section--alt">
+        <div className="lp-wrap">
+          <div className="lp-head">
+            <p className="lp-kicker">Fonctions</p>
+            <h2>Ce que l’équipe sécurité a sous la main</h2>
+          </div>
+          <div className="lp-features">
+            {FEATURES.map(({ icon: Icon, title, text }) => (
+              <article key={title} className="lp-feature"><div className="lp-feature__ico"><Icon /></div><h3>{title}</h3><p>{text}</p></article>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── CONSOLE LIVE ── */}
-      <section className="lp-section" id="plateforme">
-        <div className="reveal">
-          <div className="lp-section-label">PLATEFORME</div>
-          <h2 className="lp-section-title">Intelligence de sécurité <em>en temps réel</em></h2>
-          <p className="lp-section-sub">Visualisez, corréllez et répondez aux menaces au fur et à mesure qu'elles se produisent.</p>
-        </div>
-        <div className="lp-console reveal" style={{ animationDelay: '0.15s' }}>
-          <div className="lp-console-bar">
-            <span className="lp-dot lp-dot-r" />
-            <span className="lp-dot lp-dot-y" />
-            <span className="lp-dot lp-dot-g" />
-            <span className="lp-console-title">BaolSec · Event Stream · LIVE</span>
-            <span className="lp-console-status">● CONNECTÉ</span>
-          </div>
-          <div className="lp-console-body">
-            {LOG_LINES.map((l, i) => (
-              <div className="lp-log-line" key={i} style={{ animationDelay: `${i * 0.12}s` }}>
-                <span className="lp-log-ts">{l.ts}</span>
-                <span className={`lp-log-lvl ${l.cls}`}>{l.lvl}</span>
-                <span className="lp-log-msg" dangerouslySetInnerHTML={{ __html: l.msg }} />
-              </div>
-            ))}
-            <div className="lp-log-line">
-              <span className="lp-log-ts">03:47:18.000</span>
-              <span className="lp-log-lvl lvl-info">INFO</span>
-              <span className="lp-log-msg">En attente de nouveaux événements <span className="lp-cursor" /></span>
-            </div>
+      <section className="lp-section">
+        <div className="lp-wrap lp-split">
+          <div className="lp-split__img" style={{ backgroundImage: "url('/assets/shield.webp')" }} role="img" aria-label="Bouclier traversé par un signal" />
+          <div className="lp-split__text">
+            <p className="lp-kicker">Angles morts</p>
+            <h2>Un silence est aussi une information</h2>
+            <p>
+              Un agent arrêté, un certificat expiré ou une règle de pare-feu modifiée suffisent à couper une source.
+              Sans alerte, personne ne s’en aperçoit, et les règles qui en dépendent cessent de détecter.
+            </p>
+            <ul className="lp-checks">
+              <li>Seuil de silence propre à chaque source</li>
+              <li>Distinction entre source silencieuse et flux reçu mais non traité</li>
+              <li>Liste des règles de détection privées de données, avec la cause</li>
+              <li>Historique de chaque changement d’état</li>
+            </ul>
           </div>
         </div>
       </section>
 
-      {/* ── FEATURES ── */}
-      <section className="lp-section" id="fonctionnalites" style={{ backgroundImage: 'url("/assets/Gemini_Generated_Image_yfy78kyfy78kyfy7(2).jpeg")', backgroundSize: 'cover', backgroundPosition: 'center', maxWidth: '100%', padding: '100px 24px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <div className="reveal" style={{ textAlign: 'center', marginBottom: '4rem' }}>
-            <div className="lp-section-label" style={{ justifyContent: 'center' }}>FONCTIONNALITÉS</div>
-            <h2 className="lp-section-title" style={{ maxWidth: '100%', textAlign: 'center' }}>
-              Tout ce dont votre SOC a <em>besoin</em>
-            </h2>
+      <section id="roles" className="lp-section lp-section--alt">
+        <div className="lp-wrap">
+          <div className="lp-head">
+            <p className="lp-kicker">Rôles</p>
+            <h2>Deux rôles, des droits séparés</h2>
+            <p>Les droits sont vérifiés par le serveur à chaque requête, pas seulement masqués dans l’interface.</p>
           </div>
-          <div className="lp-features-grid reveal">
-            {FEATURES.map((f, i) => (
-              <div className="lp-feature-card" key={i}>
-                <div className="lp-feature-tag">{f.tag}</div>
-                <div className="lp-feature-ico">{f.ico}</div>
-                <h3 className="lp-feature-h">{f.h}</h3>
-                <p className="lp-feature-p">{f.p}</p>
-                <div className="lp-feature-glow" />
-              </div>
-            ))}
+          <div className="lp-roles">
+            <article className="lp-role">
+              <div className="lp-role__head"><IconShield /><h3>Analyste</h3></div>
+              <ul>
+                <li>Tableau de bord des alertes et incidents à traiter</li>
+                <li>Prise en charge, attribution, commentaires, clôture et réouverture</li>
+                <li>Recherche dans les événements et consultation de la couverture</li>
+                <li>Lecture des sources et des règles</li>
+              </ul>
+            </article>
+            <article className="lp-role">
+              <div className="lp-role__head"><IconUsers /><h3>Administrateur</h3></div>
+              <ul>
+                <li>Comptes utilisateurs, verrouillage et déverrouillage</li>
+                <li>Déclaration des sources et de leurs identifiants d’ingestion</li>
+                <li>Règles de détection et paramètres de corrélation</li>
+                <li>Journal d’audit, supervision et file de rejet</li>
+              </ul>
+            </article>
           </div>
         </div>
       </section>
 
-      {/* ── APPROCHE ── */}
-      <section className="lp-section" id="approche">
-        <div className="reveal">
-          <div className="lp-section-label">NOTRE APPROCHE</div>
-          <h2 className="lp-section-title">Conçu pour <em>chaque équipe</em></h2>
-          <p className="lp-section-sub">Une plateforme adaptée aux besoins spécifiques de chaque acteur de la sécurité.</p>
-        </div>
-        <div className="lp-approach-grid">
-          {APPROACH.map((a, i) => (
-            <div className="lp-approach-card reveal" key={i} style={{ animationDelay: `${i * 0.1}s` }}>
-              <div className="lp-approach-img-wrap">
-                <img src={a.img} alt={a.h} className="lp-approach-img" />
-                <div className="lp-approach-overlay" />
-              </div>
-              <div className="lp-approach-body">
-                <h3 className="lp-approach-h">{a.h}</h3>
-                <p className="lp-approach-p">{a.p}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ── CTA FINAL ── */}
-      <section className="lp-cta-section">
-        <img src="/assets/Gemini_Generated_Image_yfy78kyfy78kyfy7(3).jpeg" alt="" className="lp-cta-bg-img" />
-        <div className="lp-cta-overlay" />
-        <div className="lp-cta-content reveal">
-          <div className="lp-section-label" style={{ justifyContent: 'center' }}>COMMENCER</div>
-          <h2 className="lp-cta-title">Votre sécurité mérite<br /><span className="lp-gradient-text">le meilleur outil</span></h2>
-          <p className="lp-cta-sub">Rejoignez les équipes qui font confiance à BaolSec pour protéger leur infrastructure.</p>
-          <button className="lp-btn-primary lp-cta-btn" onClick={() => nav('/login')}>
-            <span>Accéder à la plateforme</span>
-            <span className="lp-btn-arrow">→</span>
-          </button>
-        </div>
-      </section>
-
-      {/* ── FOOTER ── */}
-      <footer className="lp-footer">
-        <div className="lp-footer-inner">
-          <div className="lp-nav-logo">
-            <img src="/assets/logo.jpg" alt="BaolSec" />
+      <section id="securite" className="lp-section">
+        <div className="lp-wrap lp-split lp-split--rev">
+          <div className="lp-split__text">
+            <p className="lp-kicker">Sécurité</p>
+            <h2>Une plateforme de sécurité qui s’applique ses propres règles</h2>
+            <ul className="lp-sec">
+              <li><IconLock /><div><strong>Échanges chiffrés</strong><span>HTTPS pour l’interface et la collecte, Syslog sur TLS, mots de passe hachés avec Argon2.</span></div></li>
+              <li><IconShield /><div><strong>Comptes protégés</strong><span>Verrouillage temporaire après plusieurs échecs, sessions courtes, limitation du débit des requêtes.</span></div></li>
+              <li><IconAudit /><div><strong>Traçabilité</strong><span>Connexions, refus et modifications enregistrés avec l’auteur, la cible et l’adresse d’origine.</span></div></li>
+              <li><IconServer /><div><strong>Souveraineté</strong><span>Déploiement Docker Compose sur votre infrastructure, sauvegardes PostgreSQL et instantanés OpenSearch.</span></div></li>
+            </ul>
           </div>
-          <p className="lp-footer-sub">SIEM distribué · Détection & Réponse · Projet de fin d'études L3</p>
-          <p className="lp-footer-copy">© 2026 BaolSec. Tous droits réservés.</p>
+          <div className="lp-split__img" style={{ backgroundImage: "url('/assets/soc-room.webp')" }} role="img" aria-label="Salle de supervision de sécurité" />
+        </div>
+      </section>
+
+      <section className="lp-cta">
+        <div className="lp-wrap lp-cta__in">
+          <h2>Accéder à la console BaolSec</h2>
+          <p>Les comptes sont créés par un administrateur de la plateforme.</p>
+          <Link to={target} className="btn primary lg">{cta}</Link>
+        </div>
+      </section>
+
+      <footer className="lp-foot">
+        <div className="lp-wrap lp-foot__in">
+          <span className="lp-brand small"><img src="/assets/logo-mark.png" alt="" /><span>Baol<b>Sec</b></span></span>
+          <span>SIEM distribué · collecte, détection, corrélation, couverture</span>
         </div>
       </footer>
     </div>

@@ -57,6 +57,25 @@ DEFAULT_WINDOW_MINUTES = 30
 DEFAULT_MAX_DURATION_HOURS = 24
 
 
+def apply_settings(generic_values=None, activity_chains=None) -> None:
+    """Applique les paramètres de corrélation lus dans config.settings (C3 3.8).
+
+    ``generic_values`` : liste de chaînes ; ``activity_chains`` : liste de couples
+    [famille de l'incident, famille de l'alerte]. Une valeur absente ou mal formée laisse
+    le paramètre courant inchangé (le service ne doit pas s'arrêter sur un réglage invalide).
+    """
+    global GENERIC_VALUES, ACTIVITY_CHAINS
+    if isinstance(generic_values, list) and all(isinstance(v, str) for v in generic_values):
+        GENERIC_VALUES = frozenset({"", *(v.strip().lower() for v in generic_values)})
+    if isinstance(activity_chains, list) and all(
+        isinstance(c, (list, tuple)) and len(c) == 2 and all(isinstance(x, str) for x in c) for c in activity_chains
+    ):
+        chains: dict[str, set[str]] = {}
+        for src, dst in activity_chains:
+            chains.setdefault(src.strip().lower(), set()).add(dst.strip().lower())
+        ACTIVITY_CHAINS = {k: frozenset(v) for k, v in chains.items()}
+
+
 @dataclass(frozen=True)
 class Entities:
     """Entités extraites d'une alerte (normalisées en minuscules, génériques filtrées)."""
@@ -323,25 +342,18 @@ def max_severity(current: str, incoming: str) -> str:
     return incoming if SEVERITY_ORDER.get(incoming, 0) > SEVERITY_ORDER.get(current, 0) else current
 
 
-def incident_title(entities: Entities, rule_name: str) -> str:
-    """Génère un titre d'incident à partir de la première alerte."""
-    parts = [rule_name]
-    if entities.user:
-        parts.append(f"({entities.user}")
-        if entities.source_ip:
-            parts[-1] += f", {entities.source_ip}"
-        if entities.host:
-            parts[-1] += f", {entities.host}"
-        parts[-1] += ")"
-    elif entities.source_ip:
-        parts.append(f"({entities.source_ip})")
-    elif entities.host:
-        parts.append(f"({entities.host})")
-    return " ".join(parts)
+def incident_title(entities: Entities, rule_name: str, rule_label: str | None = None) -> str:
+    """Titre lisible à partir de la première alerte : « Nom de la règle — utilisateur · IP · hôte ».
+
+    ``rule_name`` est le code de la règle (AUTH-001), utilisé si le nom lisible est absent.
+    """
+    label = (rule_label or "").strip() or rule_name
+    who = [v for v in (entities.user, entities.source_ip, entities.host) if v]
+    return f"{label} — {' · '.join(who)}" if who else label
 
 
 __all__ = [
-    "GENERIC_VALUES", "ACTIVITY_CHAINS", "DEFAULT_WINDOW_MINUTES", "DEFAULT_MAX_DURATION_HOURS",
+    "GENERIC_VALUES", "ACTIVITY_CHAINS", "apply_settings", "DEFAULT_WINDOW_MINUTES", "DEFAULT_MAX_DURATION_HOURS",
     "Entities", "extract_entities", "IncidentContext", "CandidateIncident", "MatchResult",
     "CorrelationDecision", "match_alert_to_incident", "correlate", "max_severity", "incident_title",
     "SEVERITY_ORDER",

@@ -33,6 +33,10 @@ _algorithm: str = "HS256"
 _access_expire_minutes: int = 15
 _refresh_expire_minutes: int = 480
 
+# Verrouillage temporaire après des échecs répétés (ES-01) ; valeurs posées par configure().
+max_failed_attempts: int = 5
+lockout_minutes: int = 15
+
 # ── Blocklist de tokens révoqués ──────────────────────────────────────────────
 # Structure : { jti: exp_timestamp }
 # Nettoyage automatique des entrées expirées à chaque révocation.
@@ -72,12 +76,17 @@ def configure(
     algorithm: str = "HS256",
     expire_minutes: int = 15,
     refresh_expire_minutes: int = 480,
+    failed_attempts: int = 5,
+    lockout_mins: int = 15,
 ) -> None:
     global _secret, _algorithm, _access_expire_minutes, _refresh_expire_minutes
+    global max_failed_attempts, lockout_minutes
     _secret = secret
     _algorithm = algorithm
     _access_expire_minutes = expire_minutes
     _refresh_expire_minutes = refresh_expire_minutes
+    max_failed_attempts = failed_attempts
+    lockout_minutes = lockout_mins
 
 
 def _encode(user_id: str, email: str, role: UserRole, token_type: str, ttl_minutes: int) -> str:

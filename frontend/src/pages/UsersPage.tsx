@@ -1,228 +1,174 @@
-import type { CSSProperties } from 'react';
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { users as usersApi, toList } from '../api/resources';
-import type { User, UserCreate, UserRole, UserUpdate } from '../types/api';
-import '../styles/design-system.css';
+/**
+ * Comptes utilisateurs (EF-03, ES-01, C5 /users) : création, rôle, désactivation, déverrouillage.
+ * Le serveur interdit de se retirer ses propres droits et de supprimer le dernier administrateur.
+ */
+import { useDeferredValue, useState, type FormEvent } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { admin, users } from '../api/endpoints';
+import { errorMessage } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
+import {
+  Badge, Card, Confirm, Empty, ErrorNotice, Field, LoadingRows, Modal, Notice, PageHeader, Segmented, useToast,
+} from '../components/ui';
+import { IconEdit, IconPlus, IconUsers } from '../components/icons';
+import { ago, dateTime, ROLE } from '../lib/format';
+import type { User, UserRole } from '../types/api';
 
-function initials(email: string) {
-  const parts = email.split('@')[0].split(/[._-]/);
-  return parts.length >= 2
-    ? (parts[0][0] + parts[1][0]).toUpperCase()
-    : email.slice(0, 2).toUpperCase();
-}
+type View = 'active' | 'inactive' | 'all';
+const isLocked = (u: User) => !!u.locked_until && new Date(u.locked_until) > new Date();
 
 export function UsersPage() {
+  const { user: me } = useAuth();
   const qc = useQueryClient();
-  const { data: dataRaw, isLoading } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => usersApi.list(),
+  const toast = useToast();
+  const [view, setView] = useState<View>('active');
+  const [text, setText] = useState('');
+  const [editing, setEditing] = useState<User | 'new' | null>(null);
+  const [confirm, setConfirm] = useState<User | null>(null);
+  const q = useQuery({ queryKey: ['users'], queryFn: users.list });
+  const roles = useQuery({ queryKey: ['roles'], queryFn: admin.roles });
+
+  const toggle = useMutation({
+    mutationFn: (u: User) => (u.is_active ? users.deactivate(u.id) : users.reactivate(u.id)),
+    onSuccess: (u) => { toast.ok(u.is_active ? `Compte ${u.username} réactivé et déverrouillé.` : `Compte ${u.username} désactivé.`); setConfirm(null); qc.invalidateQueries({ queryKey: ['users'] }); },
+    onError: (e) => { toast.error(e); setConfirm(null); },
   });
 
-  const data = toList<User>(dataRaw);
-
-  const disableMut = useMutation({
-    mutationFn: (id: string) => usersApi.disable(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
-  });
-  const updateMut = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: UserUpdate }) => usersApi.update(id, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
-  });
-  const createMut = useMutation({
-    mutationFn: (body: UserCreate) => usersApi.create(body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setShowForm(false); setEmail(''); setPassword(''); },
-  });
-
-  const [showForm,  setShowForm]  = useState(false);
-  const [email,     setEmail]     = useState('');
-  const [password,  setPassword]  = useState('');
-  const [role,      setRole]      = useState<UserRole>('ANALYST');
-
-  const activeCount = data.filter((u) => u.is_active).length;
-  const adminCount  = data.filter((u) => u.role === 'ADMIN').length;
+  const all = q.data?.items ?? [];
+  const needle = useDeferredValue(text).trim().toLowerCase();
+  const rows = all
+    .filter((u) => view === 'all' || (view === 'active' ? u.is_active : !u.is_active))
+    .filter((u) => !needle || `${u.username} ${u.email ?? ''}`.toLowerCase().includes(needle))
+    .sort((a, b) => a.username.localeCompare(b.username));
 
   return (
     <>
-      <div className="bs-page-header">
-        <div>
-          <h1 className="bs-page-title">Utilisateurs <span>& accès</span></h1>
-          <p className="bs-page-sub">Gestion des comptes et des droits d'accès au SIEM</p>
-        </div>
-        <button
-          className="bs-btn bs-btn-primary bs-btn-sm"
-          onClick={() => { setShowForm((v) => !v); setEmail(''); setPassword(''); }}
-        >
-          {showForm ? 'Fermer' : '+ Nouvel utilisateur'}
-        </button>
-      </div>
+      <PageHeader title="Utilisateurs"
+        subtitle="Comptes d’accès à BaolSec. Un compte désactivé ne peut plus se connecter ; ses actions passées restent tracées sous son nom."
+        actions={<button className="btn primary" onClick={() => setEditing('new')}><IconPlus />Créer un compte</button>} />
 
-      {/* KPIs */}
-      <div className="bs-kpi-grid">
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--success)' } as CSSProperties}>
-          <div className="bs-kpi-label">Comptes actifs</div>
-          <div className="bs-kpi-value bs-glow-accent">{isLoading ? '…' : activeCount}</div>
-          <div className="bs-kpi-sub">Utilisateurs avec accès</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent3)' } as CSSProperties}>
-          <div className="bs-kpi-label">Administrateurs</div>
-          <div className="bs-kpi-value">{isLoading ? '…' : adminCount}</div>
-          <div className="bs-kpi-sub">Accès complet</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent2)' } as CSSProperties}>
-          <div className="bs-kpi-label">Total</div>
-          <div className="bs-kpi-value">{isLoading ? '…' : data.length}</div>
-          <div className="bs-kpi-sub">Comptes enregistrés</div>
-        </div>
-      </div>
-
-      {/* Formulaire de création */}
-      {showForm && (
-        <div className="bs-card bs-mb-16">
-          <div className="bs-section-header">
-            <span className="bs-section-title">Créer un compte</span>
-          </div>
-          <form
-            onSubmit={(e) => { e.preventDefault(); createMut.mutate({ email, password, role }); }}
-            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, alignItems: 'end', maxWidth: 700 }}
-          >
-            <div>
-              <label className="bs-label">Adresse email *</label>
-              <input
-                className="bs-input"
-                type="email"
-                placeholder="analyst@baolsec.io"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="bs-label">Mot de passe *</label>
-              <input
-                className="bs-input"
-                type="password"
-                placeholder="Min. 8 caractères"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
-              />
-            </div>
-            <div>
-              <label className="bs-label">Rôle</label>
-              <select
-                className="bs-select"
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-              >
-                <option value="ANALYST">ANALYST</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label className="bs-label">&nbsp;</label>
-              <button
-                type="submit"
-                className="bs-btn bs-btn-primary bs-btn-sm"
-                disabled={createMut.isPending}
-              >
-                {createMut.isPending ? '…' : '+ Créer'}
-              </button>
-            </div>
-            {createMut.isError && (
-              <div className="bs-error" style={{ gridColumn: '1 / -1', fontSize: 12 }}>
-                Email déjà utilisé ou erreur serveur
-              </div>
-            )}
-          </form>
+      {roles.data && (
+        <div className="grid grid-2 mb-16">
+          {roles.data.filter((r) => r.api_role).map((r) => (
+            <section key={r.id} className="card card-pad">
+              <div className="row between"><h3 style={{ fontSize: 15, fontWeight: 600 }}>{r.api_role ? ROLE[r.api_role] : r.name}</h3><span className="small faint">{r.active_users} compte(s) actif(s)</span></div>
+              {r.description && <p className="small muted mt-8">{r.description}</p>}
+              <ul className="small muted mt-8" style={{ margin: '8px 0 0', paddingLeft: 18, display: 'grid', gap: 3 }}>
+                {r.permissions.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+            </section>
+          ))}
         </div>
       )}
 
-      {/* Table */}
-      {isLoading ? (
-        <div className="bs-loading"><div className="bs-spinner" /> Chargement des utilisateurs…</div>
-      ) : (
-        <div className="bs-card" style={{ padding: 0 }}>
-          <div className="bs-table-wrap" style={{ border: 'none', borderRadius: 'var(--radius)' }}>
-            <table className="bs-table">
-              <thead>
-                <tr>
-                  <th>Utilisateur</th>
-                  <th>Rôle</th>
-                  <th>Statut</th>
-                  <th>Inscrit le</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((u: User) => (
-                  <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5 }}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div className="bs-user-avatar" style={{
-                          width: 30, height: 30, minWidth: 30, fontSize: 11,
-                          background: u.role === 'ADMIN' ? 'rgba(124,58,237,0.2)' : 'rgba(0,212,170,0.15)',
-                          color: u.role === 'ADMIN' ? 'var(--accent3)' : 'var(--accent)',
-                        }}>
-                          {initials(u.email)}
-                        </div>
-                        <span style={{ fontWeight: 500, fontSize: 13, color: 'var(--fg)' }}>{u.email}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <select
-                        className="bs-select"
-                        value={u.role}
-                        onChange={(e) => updateMut.mutate({ id: u.id, body: { role: e.target.value as UserRole } })}
-                        style={{ padding: '3px 8px', fontSize: 11, width: 'auto' }}
-                        disabled={updateMut.isPending}
-                      >
-                        <option value="ANALYST">ANALYST</option>
-                        <option value="ADMIN">ADMIN</option>
-                      </select>
-                    </td>
-                    <td>
-                      <span className={`bs-badge ${u.is_active ? 'active' : 'neutral'}`}>
-                        {u.is_active ? 'Actif' : 'Désactivé'}
-                      </span>
-                    </td>
-                    <td className="bs-mono" style={{ fontSize: 11, color: 'var(--fg3)' }}>
-                      {new Date(u.created_at).toLocaleDateString('fr-FR')}
-                    </td>
-                    <td>
-                      {u.is_active && (
-                        <button
-                          className="bs-btn bs-btn-danger bs-btn-xs"
-                          disabled={disableMut.isPending}
-                          onClick={() => {
-                            if (window.confirm(`Désactiver l'utilisateur « ${u.email} » ?`)) {
-                              disableMut.mutate(u.id);
-                            }
-                          }}
-                        >
-                          Désactiver
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {data.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>
-                      <div className="bs-empty">
-                        <div className="bs-empty-icon">◎</div>
-                        <div className="bs-empty-text">Aucun utilisateur enregistré</div>
-                        <div className="bs-empty-sub">Créez le premier compte ci-dessus</div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+      <Card>
+        <div className="card-body">
+          <div className="filters">
+            <Segmented<View> value={view} onChange={setView} options={[
+              { value: 'active', label: 'Actifs', count: all.filter((u) => u.is_active).length },
+              { value: 'inactive', label: 'Désactivés', count: all.filter((u) => !u.is_active).length },
+              { value: 'all', label: 'Tous', count: all.length },
+            ]} />
+            <Field label="Filtrer" className="grow"><input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Nom ou adresse e-mail…" /></Field>
           </div>
         </div>
+        {q.error ? <div className="card-body"><ErrorNotice error={q.error} retry={() => q.refetch()} /></div> : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Utilisateur</th><th>Rôle</th><th>État</th><th>Dernière connexion</th><th>Créé le</th><th /></tr></thead>
+              {q.isLoading ? <LoadingRows cols={6} /> : (
+                <tbody>
+                  {rows.map((u) => (
+                    <tr key={u.id} className={u.is_active ? '' : 'dim'}>
+                      <td className="title-cell"><strong>{u.username}{u.id === me?.id && <span className="faint small"> (vous)</span>}</strong><span>{u.email ?? '—'}</span></td>
+                      <td><Badge tone={u.role === 'ADMIN' ? 'accent' : 'info'}>{ROLE[u.role]}</Badge></td>
+                      <td>{!u.is_active ? <Badge>Désactivé</Badge> : isLocked(u)
+                        ? <Badge tone="warn" title={`Jusqu’au ${dateTime(u.locked_until)}`}>Verrouillé</Badge> : <Badge tone="ok" dot>Actif</Badge>}</td>
+                      <td className="faint nowrap" title={dateTime(u.last_login_at)}>{u.last_login_at ? ago(u.last_login_at) : 'Jamais'}</td>
+                      <td className="faint nowrap">{dateTime(u.created_at)}</td>
+                      <td className="actions">
+                        {isLocked(u) && u.is_active && <button className="btn sm" onClick={() => toggle.mutate({ ...u, is_active: false })}>Déverrouiller</button>}{' '}
+                        <button className="btn sm ghost" onClick={() => setEditing(u)} aria-label={`Modifier ${u.username}`}><IconEdit /></button>{' '}
+                        {u.id !== me?.id && <button className={`btn sm ${u.is_active ? 'danger' : ''}`} onClick={() => (u.is_active ? setConfirm(u) : toggle.mutate(u))}>{u.is_active ? 'Désactiver' : 'Réactiver'}</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              )}
+            </table>
+            {!q.isLoading && rows.length === 0 && <Empty title="Aucun compte" icon={<IconUsers />} />}
+          </div>
+        )}
+      </Card>
+
+      {editing && <UserForm user={editing === 'new' ? null : editing} self={editing !== 'new' && editing.id === me?.id} onClose={() => setEditing(null)} />}
+      {confirm && (
+        <Confirm title={`Désactiver ${confirm.username} ?`} danger confirmLabel="Désactiver" busy={toggle.isPending}
+          onCancel={() => setConfirm(null)} onConfirm={() => toggle.mutate(confirm)}>
+          L’utilisateur ne pourra plus se connecter et ses sessions en cours expireront. Le compte et son historique sont conservés ; vous pourrez le réactiver.
+        </Confirm>
       )}
     </>
+  );
+}
+
+function UserForm({ user, self, onClose }: { user: User | null; self: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [username, setUsername] = useState(user?.username ?? '');
+  const [role, setRole] = useState<UserRole>(user?.role ?? 'ANALYST');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (user) {
+        const body: Record<string, unknown> = {};
+        if (email.trim() !== (user.email ?? '')) body.email = email.trim();
+        if (username.trim() !== user.username) body.username = username.trim();
+        if (role !== user.role) body.role = role;
+        if (password) body.password = password;
+        return users.update(user.id, body);
+      }
+      return users.create({ email: email.trim(), username: username.trim() || undefined, password, role });
+    },
+    onSuccess: (u) => { toast.ok(user ? `Compte ${u.username} mis à jour.` : `Compte ${u.username} créé.`); qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['roles'] }); onClose(); },
+    onError: (err) => setError(errorMessage(err)),
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault(); setError(null);
+    if (!email.trim()) return setError('L’adresse e-mail est obligatoire.');
+    if (!user && password.length < 8) return setError('Le mot de passe doit contenir au moins 8 caractères.');
+    if (user && password && password.length < 8) return setError('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+    save.mutate();
+  };
+
+  return (
+    <Modal title={user ? `Modifier ${user.username}` : 'Créer un compte'}
+      subtitle={user ? 'Laissez le mot de passe vide pour le conserver.' : 'Transmettez le mot de passe initial à l’utilisateur par un canal sûr.'}
+      onClose={onClose}
+      footer={<>
+        <button className="btn ghost" onClick={onClose}>Annuler</button>
+        <button className="btn primary" type="submit" form="user-form" disabled={save.isPending}>{save.isPending && <span className="spinner" />}{user ? 'Enregistrer' : 'Créer'}</button>
+      </>}>
+      <form id="user-form" className="stack" onSubmit={submit} autoComplete="off">
+        {error && <Notice kind="error">{error}</Notice>}
+        <div className="form-grid">
+          <Field label="Adresse e-mail" className="full"><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus /></Field>
+          <Field label="Identifiant" help={user ? undefined : 'Facultatif : déduit de l’adresse e-mail.'}><input className="input" value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
+          <Field label="Rôle" help={self ? 'Vous ne pouvez pas modifier votre propre rôle.' : undefined}>
+            <select className="select" value={role} disabled={self} onChange={(e) => setRole(e.target.value as UserRole)}>
+              <option value="ANALYST">Analyste — traite alertes et incidents</option>
+              <option value="ADMIN">Administrateur — gère comptes, sources et règles</option>
+            </select>
+          </Field>
+          <Field label={user ? 'Nouveau mot de passe' : 'Mot de passe initial'} className="full" help="8 caractères au minimum ; privilégiez une phrase de passe.">
+            <input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+        </div>
+      </form>
+    </Modal>
   );
 }

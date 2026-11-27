@@ -48,9 +48,14 @@ async def run(settings: Settings) -> None:
     supervision.install_signal_handlers = lambda: None
 
     loop = asyncio.get_running_loop()
+    def _stop() -> None:
+        # Un seul gestionnaire par signal : add_signal_handler remplace le précédent, et un second
+        # appel pour outbox.stop empêchait l'arrêt du consommateur (processus bloqué jusqu'au SIGKILL).
+        consumer.stop()
+        outbox.stop()
+
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, consumer.stop)
-        loop.add_signal_handler(sig, outbox.stop)
+        loop.add_signal_handler(sig, _stop)
     outbox_task = asyncio.create_task(outbox.run(), name="outbox-publisher")
     server = asyncio.create_task(supervision.serve(), name="supervision")
     log.info("service Incidents démarré : %s/%s → incidents.alert_state, outbox → INCIDENTS, commandes sur le port %d",

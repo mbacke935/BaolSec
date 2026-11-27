@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     opensearch_url: str = "http://localhost:9200"
     opensearch_user: str = ""
     opensearch_password: str = ""
+    opensearch_ca_cert: str = ""
+    opensearch_verify_certs: bool = True
 
     # PostgreSQL (optionnel — pour enrichissement)
     postgres_dsn: str = ""

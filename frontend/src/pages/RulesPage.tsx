@@ -1,224 +1,224 @@
-import type { CSSProperties } from 'react';
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { rules as rulesApi, toList } from '../api/resources';
-import type { Rule, RuleCreate, Severity } from '../types/api';
-import '../styles/design-system.css';
+/**
+ * Règles de détection (EF-05, C12/C13) : définitions YAML au contrat rule/v1, versionnées.
+ * Chaque modification de la définition crée une nouvelle version ; le code (AUTH-001…) est définitif.
+ * Écriture réservée à l'Administrateur ; l'Analyste consulte.
+ */
+import { useDeferredValue, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { rules } from '../api/endpoints';
+import { errorMessage } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
+import {
+  Badge, Card, Drawer, Empty, ErrorNotice, Field, LoadingRows, Modal, Notice, PageHeader, Segmented,
+  SeverityBadge, Tabs, useToast,
+} from '../components/ui';
+import { IconEdit, IconPlus, IconRule } from '../components/icons';
+import { ago, dateTime, SEVERITIES, SEVERITY, SEVERITY_HELP } from '../lib/format';
+import { CATEGORY, ruleInPlainWords } from '../lib/readable';
 
-const SEVERITIES: Severity[] = ['INFO', 'FAIBLE', 'MOYEN', 'ELEVE', 'CRITIQUE'];
+const categories = (c: string[]) => c.map((x) => CATEGORY[x] ?? x).join(', ');
+import type { Rule, Severity } from '../types/api';
+
+const TEMPLATE = `# Contrat rule/v1 — voir rules/README.md
+id: AUTH-010
+name: Nom court de la règle
+description: >
+  Ce que la règle détecte et pourquoi c'est suspect.
+severity: moyenne          # faible | moyenne | elevee | critique
+type: window               # simple (un événement suffit) | window (seuil sur une fenêtre)
+category: [authentication]
+match:
+  event.category: authentication
+  event.outcome: failure
+group_by: [user.name, source.ip]
+window: 10m                # 24h au maximum
+threshold: 5
+message: "{count} échecs pour {user.name} depuis {source.ip} en {window}"
+requires:
+  - source_type: linux
+    fields: [user.name, source.ip]
+`;
+
+type View = 'all' | 'enabled' | 'disabled';
 
 export function RulesPage() {
-  const qc = useQueryClient();
-  const { data: dataRaw, isLoading } = useQuery({
-    queryKey: ['rules'],
-    queryFn: () => rulesApi.list(),
-  });
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+  const [view, setView] = useState<View>('all');
+  const [severity, setSeverity] = useState<'' | Severity>('');
+  const [text, setText] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Rule | 'new' | null>(null);
+  const q = useQuery({ queryKey: ['rules'], queryFn: () => rules.list() });
 
-  const data = toList<Rule>(dataRaw);
-
-  const toggleMut = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => rulesApi.update(id, { enabled }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['rules'] }),
-  });
-  const disableMut = useMutation({
-    mutationFn: (id: string) => rulesApi.disable(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['rules'] }),
-  });
-  const createMut = useMutation({
-    mutationFn: (body: RuleCreate) => rulesApi.create(body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['rules'] }); setShowForm(false); resetForm(); },
-  });
-
-  const [showForm, setShowForm]     = useState(false);
-  const [name, setName]             = useState('');
-  const [severity, setSeverity]     = useState<Severity>('MOYEN');
-  const [logicJson, setLogicJson]   = useState('{\n  \n}');
-  const [logicError, setLogicError] = useState('');
-
-  function resetForm() { setName(''); setSeverity('MOYEN'); setLogicJson('{\n  \n}'); setLogicError(''); }
-
-  function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      const logic = JSON.parse(logicJson);
-      setLogicError('');
-      createMut.mutate({ name, severity, logic });
-    } catch {
-      setLogicError('JSON invalide — vérifiez la syntaxe');
-    }
-  }
-
-  const activeCount   = data.filter((r) => r.enabled).length;
-  const critiqueCount = data.filter((r) => r.severity === 'CRITIQUE' || r.severity === 'ELEVE').length;
+  const all = q.data?.items ?? [];
+  const needle = useDeferredValue(text).trim().toLowerCase();
+  const rows = all
+    .filter((r) => view === 'all' || (view === 'enabled' ? r.enabled : !r.enabled))
+    .filter((r) => !severity || r.severity === severity)
+    .filter((r) => !needle || `${r.code ?? ''} ${r.name} ${r.description ?? ''} ${r.category.join(' ')} ${categories(r.category)}`.toLowerCase().includes(needle))
+    .sort((a, b) => (a.code ?? a.name).localeCompare(b.code ?? b.name));
 
   return (
     <>
-      <div className="bs-page-header">
-        <div>
-          <h1 className="bs-page-title">Règles de <span>détection</span></h1>
-          <p className="bs-page-sub">Gestion des règles de corrélation et d'alerte SIEM</p>
-        </div>
-        <button className="bs-btn bs-btn-primary bs-btn-sm" onClick={() => { setShowForm((v) => !v); resetForm(); }}>
-          {showForm ? 'Fermer' : '+ Nouvelle règle'}
-        </button>
-      </div>
+      <PageHeader title="Règles de détection"
+        subtitle={isAdmin
+          ? 'Chaque règle est un fichier YAML au contrat rule/v1. Toute modification crée une nouvelle version ; les versions précédentes restent consultables.'
+          : 'Règles appliquées par le moteur de détection (consultation). Ouvrez une règle pour lire sa définition et son historique.'}
+        actions={isAdmin && <button className="btn primary" onClick={() => setEditing('new')}><IconPlus />Nouvelle règle</button>} />
 
-      {/* KPIs */}
-      <div className="bs-kpi-grid">
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--success)' } as CSSProperties}>
-          <div className="bs-kpi-label">Règles actives</div>
-          <div className="bs-kpi-value bs-glow-accent">{isLoading ? '…' : activeCount}</div>
-          <div className="bs-kpi-sub">En cours d'évaluation</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--danger)' } as CSSProperties}>
-          <div className="bs-kpi-label">Critique / Élevé</div>
-          <div className={`bs-kpi-value ${critiqueCount > 0 ? 'bs-glow-danger' : ''}`}>
-            {isLoading ? '…' : critiqueCount}
-          </div>
-          <div className="bs-kpi-sub">Règles haute sévérité</div>
-        </div>
-        <div className="bs-kpi" style={{ '--kpi-color': 'var(--accent2)' } as CSSProperties}>
-          <div className="bs-kpi-label">Total</div>
-          <div className="bs-kpi-value">{isLoading ? '…' : data.length}</div>
-          <div className="bs-kpi-sub">Règles enregistrées</div>
-        </div>
-      </div>
-
-      {/* Formulaire de création */}
-      {showForm && (
-        <div className="bs-card bs-mb-16">
-          <div className="bs-section-header">
-            <span className="bs-section-title">Nouvelle règle de détection</span>
-          </div>
-          <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 580 }}>
-            <div>
-              <label className="bs-label">Nom de la règle *</label>
-              <input
-                className="bs-input"
-                placeholder="ex: Brute Force SSH détecté"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="bs-label">Sévérité</label>
-              <select
-                className="bs-select"
-                value={severity}
-                onChange={(e) => setSeverity(e.target.value as Severity)}
-              >
-                {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
+      <Card>
+        <div className="card-body">
+          <div className="filters">
+            <Segmented<View> value={view} onChange={setView} options={[
+              { value: 'all', label: 'Toutes', count: all.length },
+              { value: 'enabled', label: 'Actives', count: all.filter((r) => r.enabled).length },
+              { value: 'disabled', label: 'Désactivées', count: all.filter((r) => !r.enabled).length },
+            ]} />
+            <Field label="Gravité">
+              <select className="select" value={severity} onChange={(e) => setSeverity(e.target.value as Severity | '')}>
+                <option value="">Toutes</option>
+                {SEVERITIES.map((s) => <option key={s} value={s}>{SEVERITY[s].label}</option>)}
               </select>
-            </div>
-            <div>
-              <label className="bs-label">Logique de détection (JSON)</label>
-              <textarea
-                className="bs-input"
-                value={logicJson}
-                onChange={(e) => setLogicJson(e.target.value)}
-                rows={6}
-                style={{ fontFamily: 'var(--font-mono)', fontSize: 12, resize: 'vertical' }}
-              />
-              {logicError && (
-                <div className="bs-error" style={{ marginTop: 6, fontSize: 12 }}>{logicError}</div>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
-              {createMut.isError && (
-                <span style={{ fontSize: 12, color: 'var(--danger)' }}>Erreur lors de la création</span>
-              )}
-              <button
-                type="button"
-                className="bs-btn bs-btn-secondary bs-btn-sm"
-                onClick={() => { setShowForm(false); resetForm(); }}
-              >
-                Annuler
-              </button>
-              <button type="submit" className="bs-btn bs-btn-primary bs-btn-sm" disabled={createMut.isPending}>
-                {createMut.isPending ? '…' : 'Créer la règle'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {isLoading ? (
-        <div className="bs-loading"><div className="bs-spinner" /> Chargement des règles…</div>
-      ) : (
-        <div className="bs-card" style={{ padding: 0 }}>
-          <div className="bs-table-wrap" style={{ border: 'none', borderRadius: 'var(--radius)' }}>
-            <table className="bs-table">
-              <thead>
-                <tr>
-                  <th>Nom</th>
-                  <th>Sévérité</th>
-                  <th>Statut</th>
-                  <th>Version</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((r: Rule) => (
-                  <tr key={r.id} style={{ opacity: r.enabled ? 1 : 0.5 }}>
-                    <td style={{ color: 'var(--fg)', fontWeight: 600, fontSize: 13 }}>
-                      {r.name}
-                    </td>
-                    <td>
-                      <span className={`bs-badge ${r.severity.toLowerCase()}`}>{r.severity}</span>
-                    </td>
-                    <td>
-                      <span className={`bs-badge ${r.enabled ? 'active' : 'neutral'}`}>
-                        {r.enabled ? 'Active' : 'Désactivée'}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="bs-mono bs-code" style={{ fontSize: 11 }}>v{r.version}</span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                        <button
-                          className="bs-btn bs-btn-secondary bs-btn-xs"
-                          style={r.enabled
-                            ? { color: 'var(--warn)', borderColor: 'rgba(245,158,11,0.3)' }
-                            : { color: 'var(--success)', borderColor: 'rgba(16,185,129,0.3)' }
-                          }
-                          onClick={() => toggleMut.mutate({ id: r.id, enabled: !r.enabled })}
-                          disabled={toggleMut.isPending}
-                        >
-                          {r.enabled ? 'Désactiver' : 'Activer'}
-                        </button>
-                        <button
-                          className="bs-btn bs-btn-danger bs-btn-xs"
-                          disabled={disableMut.isPending}
-                          onClick={() => {
-                            if (window.confirm(`Supprimer la règle « ${r.name} » ? Cette action est irréversible.`)) {
-                              disableMut.mutate(r.id);
-                            }
-                          }}
-                        >
-                          Supprimer
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {data.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>
-                      <div className="bs-empty">
-                        <div className="bs-empty-icon">⚡</div>
-                        <div className="bs-empty-text">Aucune règle configurée</div>
-                        <div className="bs-empty-sub">Créez votre première règle de détection ci-dessus</div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            </Field>
+            <Field label="Filtrer" className="grow"><input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Code, nom, catégorie…" /></Field>
           </div>
         </div>
-      )}
+        {q.error ? <div className="card-body"><ErrorNotice error={q.error} retry={() => q.refetch()} /></div> : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Code</th><th>Règle</th><th>Type</th><th>Gravité</th><th className="num">Version</th><th>Modifiée</th><th>État</th></tr></thead>
+              {q.isLoading ? <LoadingRows cols={7} /> : (
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.id} className={`clickable ${r.enabled ? '' : 'dim'}`} onClick={() => setSelected(r.id)}>
+                      <td className="mono nowrap">{r.code ?? '—'}</td>
+                      <td className="title-cell" style={{ maxWidth: 440 }}><strong className="truncate">{r.name}</strong><span className="truncate">{categories(r.category)}</span></td>
+                      <td className="small">{r.rule_type === 'window' ? 'Seuil sur fenêtre' : 'Simple'}</td>
+                      <td><SeverityBadge value={r.severity} /></td>
+                      <td className="num">v{r.version}</td>
+                      <td className="faint nowrap" title={dateTime(r.updated_at)}>{ago(r.updated_at)}</td>
+                      <td>{r.enabled ? <Badge tone="ok" dot>Active</Badge> : <Badge>Désactivée</Badge>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              )}
+            </table>
+            {!q.isLoading && rows.length === 0 && <Empty title="Aucune règle" icon={<IconRule />}>Aucune règle ne correspond à ces filtres.</Empty>}
+          </div>
+        )}
+      </Card>
+
+      {selected && <RuleDrawer id={selected} isAdmin={isAdmin} onClose={() => setSelected(null)}
+        onEdit={(r) => { setSelected(null); setEditing(r); }} />}
+      {editing && <RuleEditor rule={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
     </>
+  );
+}
+
+function RuleDrawer({ id, isAdmin, onClose, onEdit }: { id: string; isAdmin: boolean; onClose: () => void; onEdit: (r: Rule) => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [tab, setTab] = useState<'def' | 'versions'>('def');
+  const [openVersion, setOpenVersion] = useState<number | null>(null);
+  const r = useQuery({ queryKey: ['rule', id], queryFn: () => rules.get(id) });
+  const v = useQuery({ queryKey: ['rule', id, 'versions'], queryFn: () => rules.versions(id), enabled: tab === 'versions' });
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => rules.setEnabled(id, enabled),
+    onSuccess: (_d, enabled) => { toast.ok(enabled ? 'Règle activée.' : 'Règle désactivée.'); qc.invalidateQueries({ queryKey: ['rules'] }); qc.invalidateQueries({ queryKey: ['rule', id] }); },
+    onError: (e) => toast.error(e),
+  });
+  const rule = r.data;
+
+  return (
+    <Drawer title={rule ? rule.name : 'Règle'} subtitle={rule ? <span className="mono">{rule.code} · version {rule.version}</span> : null} onClose={onClose}
+      footer={isAdmin && rule ? (
+        <div className="row" style={{ width: '100%', justifyContent: 'space-between' }}>
+          <button className={`btn ${rule.enabled ? 'danger' : ''}`} disabled={toggle.isPending} onClick={() => toggle.mutate(!rule.enabled)}>{rule.enabled ? 'Désactiver' : 'Activer'}</button>
+          <button className="btn primary" onClick={() => onEdit(rule)}><IconEdit />Modifier la définition</button>
+        </div>
+      ) : undefined}>
+      {r.error ? <ErrorNotice error={r.error} /> : !rule ? <div className="skeleton" /> : (
+        <div className="stack">
+          <div className="row"><SeverityBadge value={rule.severity} />{rule.enabled ? <Badge tone="ok" dot>Active</Badge> : <Badge>Désactivée</Badge>}
+            <span className="tag">{rule.rule_type === 'window' ? 'Seuil sur fenêtre' : 'Simple'}</span></div>
+          {rule.description && <p className="muted">{rule.description}</p>}
+          <PlainRule rule={rule} />
+          <dl className="kv">
+            <dt>Gravité</dt><dd>{SEVERITY_HELP[rule.severity]}</dd>
+            <dt>Catégories</dt><dd>{categories(rule.category) || '—'}</dd>
+            <dt>Créée</dt><dd>{dateTime(rule.created_at)}</dd>
+            <dt>Dernière modification</dt><dd>{dateTime(rule.updated_at)}</dd>
+          </dl>
+          <Tabs value={tab} onChange={setTab} tabs={[{ value: 'def', label: 'Définition' }, { value: 'versions', label: 'Historique des versions' }]} />
+          {tab === 'def' ? (
+            <pre className="secret code-block">{rule.definition_yaml ?? JSON.stringify(rule.logic, null, 2)}</pre>
+          ) : v.error ? <ErrorNotice error={v.error} /> : v.isLoading ? <div className="skeleton" /> : (
+            <div className="stack" style={{ gap: 8 }}>
+              {(v.data ?? []).map((ver) => (
+                <div key={ver.version} className="card">
+                  <button className="row between" style={{ width: '100%', padding: '12px 16px', background: 'none', border: 0, color: 'inherit', cursor: 'pointer', textAlign: 'left' }}
+                    onClick={() => setOpenVersion(openVersion === ver.version ? null : ver.version)}>
+                    <span><strong>Version {ver.version}</strong>{ver.version === rule.version && <Badge tone="accent">en vigueur</Badge>}</span>
+                    <span className="small faint">{dateTime(ver.created_at)}{ver.created_by_name ? ` · ${ver.created_by_name}` : ''}</span>
+                  </button>
+                  {openVersion === ver.version && <pre className="secret code-block" style={{ margin: '0 16px 14px' }}>{ver.definition_yaml}</pre>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+function RuleEditor({ rule, onClose }: { rule: Rule | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [yaml, setYaml] = useState(rule?.definition_yaml ?? TEMPLATE);
+  const [enabled, setEnabled] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => (rule ? rules.update(rule.id, { definition_yaml: yaml }) : rules.create(yaml, enabled)),
+    onSuccess: (saved) => {
+      toast.ok(rule ? (saved.version > rule.version ? `Version ${saved.version} enregistrée.` : 'Aucun changement : la définition est identique.') : `Règle ${saved.code ?? ''} créée.`);
+      qc.invalidateQueries({ queryKey: ['rules'] });
+      qc.invalidateQueries({ queryKey: ['rule', saved.id] });
+      onClose();
+    },
+    onError: (err) => setError(errorMessage(err)),
+  });
+
+  return (
+    <Modal wide title={rule ? `Modifier ${rule.code ?? rule.name}` : 'Nouvelle règle'}
+      subtitle={rule ? `Version actuelle : ${rule.version}. L’enregistrement crée la version ${rule.version + 1} si la définition change. Le champ id ne peut pas changer.` : 'La définition est validée par le serveur (schéma rule/v1, expressions régulières, fenêtre de 24 h au plus).'}
+      onClose={onClose}
+      footer={<>
+        {!rule && <label className="check" style={{ marginRight: 'auto' }}><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />Activer dès l’enregistrement</label>}
+        <button className="btn ghost" onClick={onClose}>Annuler</button>
+        <button className="btn primary" disabled={save.isPending || yaml.trim().length < 10} onClick={() => { setError(null); save.mutate(); }}>{save.isPending && <span className="spinner" />}Enregistrer</button>
+      </>}>
+      <div className="stack">
+        {error && <Notice kind="error"><span style={{ whiteSpace: 'pre-wrap' }}>{error}</span></Notice>}
+        <textarea className="textarea code" spellCheck={false} value={yaml} onChange={(e) => setYaml(e.target.value)} aria-label="Définition YAML" />
+        <p className="small faint">Champs obligatoires : id (ex. AUTH-010), name, severity, type, match, message. Pour une règle à fenêtre : group_by, window, threshold.</p>
+      </div>
+    </Modal>
+  );
+}
+
+/** La règle racontée en clair : quand elle se déclenche et sur quels événements. */
+function PlainRule({ rule }: { rule: Rule }) {
+  const p = ruleInPlainWords(rule);
+  return (
+    <section className="advice">
+      <strong>En clair</strong>
+      <p>{p.trigger}</p>
+      {p.conditions.length > 0 && (<>
+        <p className="small muted">Événements pris en compte :</p>
+        <ul className="plain-list">{p.conditions.map((c) => <li key={c}>{c}</li>)}</ul>
+      </>)}
+    </section>
   );
 }
