@@ -163,21 +163,23 @@ src/coverage/
 - **Déduplication** : la clé est le couple (consommateur, numéro de séquence du message dans le broker), enregistré par lot dans `coverage_batches` (C4 section 7).
 - **Événements en retard** : la couverture compte selon l'heure de réception (`received_at`), pas l'heure d'origine ; un retard ne fausse donc pas l'état d'une source.
 
-### 3.7 `services/api/` — API REST
-Référence : C3 4.9, matrice des rôles (C2 3), C4 schémas `acces` et `config`.
+### 3.7 `services/baolsec-api/` — API REST
+Référence : C3 4.9, matrice des rôles (C2 3), C4 schémas `acces` et `config`, contrat C5 (`docs/api/openapi.yaml`).
 
 ```text
-src/api/
-├── auth/             # JWT, renouvellement, Argon2, verrouillage après échecs
-├── rbac/             # contrôle par rôle sur chaque route (Administrateur, Analyste)
-├── routers/          # users, sources, rules, settings, audit, events, alerts, incidents, coverage
-├── clients/
-│   ├── incident_commands/   # envoi des commandes au service Incidents
-│   └── search/              # lecture OpenSearch
-├── repositories/     # écriture : acces, config ; lecture seule : incidents, couverture
-└── audit/            # journal d'audit en ajout seul
+src/baolsec_api/
+├── main.py           # application FastAPI, middlewares (sécurité, audit, CORS), /health, /metrics
+├── config.py         # variables d'environnement (Pydantic Settings)
+├── auth.py           # JWT d'accès et de renouvellement, Argon2, verrouillage après échecs (ES-01)
+├── dependencies.py   # contrôle du rôle sur chaque route (ES-03), pagination
+├── middleware/       # security.py (débit, taille, en-têtes, ES-05) ; audit.py (mutations, ES-07)
+├── commandclient.py  # commandes incident_command/v1 vers le service Incidents
+├── broker.py         # lecture de la file de rejet et des flux JetStream
+├── rulecheck.py      # validation des règles YAML (contrat rule/v1)
+└── routers/          # auth, users, sources, rules, admin (settings, roles, audit, dlq), alerts,
+                      # incidents, coverage, search et events, system (supervision)
+seed_admin.py         # création du premier compte administrateur (make admin-create)
 ```
-Écrit : schémas `acces` et `config`. Le journal d'audit est la table `acces.audit_log` : le compte de l'API n'y a que les droits INSERT et SELECT (C4 4.5). Lit : OpenSearch, les schémas `incidents` et `couverture`, et les référentiels autorisés.
 
 ### 3.8 `frontend/` — Interface web
 Référence : C3 4.10, maquette interactive v3 (design Nexus).
@@ -301,7 +303,7 @@ scripts/
 | `services/incident-builder` | 4 · Incidents | 4.6 | W4, 3.8 | schéma `incidents` | config.rules, config.settings, acces.users |
 | `services/indexing-worker` | 5 · Indexation | 4.7 | W5 | OpenSearch | — |
 | `services/coverage-worker` | 6 · Couverture | 4.8 | W6 | schéma `couverture` | config.sources, config.rules |
-| `services/api` | 7 · API REST | 4.9 | — | schémas `acces` (dont `audit_log`), `config` | OpenSearch, schémas `incidents` et `couverture`, référentiels autorisés |
+| `services/baolsec-api` | 7 · API REST | 4.9 | — | schémas `acces` (dont `audit_log`), `config` | OpenSearch, schémas `incidents` et `couverture`, référentiels autorisés |
 | `frontend` | 8 · Interface web | 4.10 | — | — | API uniquement |
 | `agents` | Agents de collecte | 2.3 | W1 | — (envoi à la passerelle) | journaux locaux |
 

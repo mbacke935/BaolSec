@@ -1,4 +1,3 @@
-# Spécification OpenAPI de l'API BaolSec — C5. Générée à partir de docs/conception (C3, C4, C5) ; à maintenir en même temps que le code.
 openapi: 3.1.0
 info:
   title: API BaolSec
@@ -24,6 +23,10 @@ tags:
 - name: Alertes
 - name: Incidents
 - name: Couverture
+- name: Recherche
+  description: Recherche Lucene dans les index
+- name: Supervision
+  description: État de la plateforme
 paths:
   /auth/login:
     post:
@@ -511,6 +514,35 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CredentialCreate'
+    get:
+      operationId: listSourceCredentials
+      summary: Identifiants d'une source (métadonnées, jamais le secret)
+      tags:
+      - Sources
+      x-baolsec-roles:
+      - administrateur
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Credential'
+        '401': &id010
+          $ref: '#/components/responses/Unauthorized'
+        '403': &id011
+          $ref: '#/components/responses/Forbidden'
+      parameters: &id015
+      - name: source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Identifiant de la source
   /sources/{source_id}/credentials/{credential_id}/revoke:
     post:
       operationId: revokeCredential
@@ -1073,7 +1105,7 @@ paths:
       - name: event_id
         in: path
         required: true
-        schema: &id013
+        schema: &id019
           type: string
           pattern: ^[A-Za-z0-9._:-]{8,128}$
         description: event.id de l'événement
@@ -1125,7 +1157,7 @@ paths:
       - name: severity
         in: query
         required: false
-        schema: &id012
+        schema: &id018
           type: string
           enum:
           - info
@@ -1175,7 +1207,7 @@ paths:
         name: alert_id
         in: path
         required: true
-        schema: &id014
+        schema: &id020
           type: string
           pattern: ^[0-9a-f]{64}$
         description: event.id de l'alerte (alert_id)
@@ -1446,6 +1478,34 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CommentCreate'
+    get:
+      operationId: listIncidentComments
+      summary: Commentaires d'un incident
+      tags:
+      - Incidents
+      x-baolsec-roles: &id012
+      - administrateur
+      - analyste
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+        '401': *id010
+        '403': *id011
+      parameters: &id013
+      - name: incident_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Identifiant de l'incident
   /incidents/{incident_id}/close:
     post:
       operationId: closeIncident
@@ -1575,6 +1635,340 @@ paths:
       - *id003
       - $ref: '#/components/parameters/From'
       - $ref: '#/components/parameters/To'
+  /incidents/{incident_id}/timeline:
+    get:
+      operationId: getIncidentTimeline
+      summary: Chronologie d'un incident (corrélations, changements d'état, commentaires)
+      tags:
+      - Incidents
+      x-baolsec-roles: *id012
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TimelineEntry'
+        '401': *id010
+        '403': *id011
+        '404': &id014
+          $ref: '#/components/responses/NotFound'
+      parameters: *id013
+  /incidents/{incident_id}/alerts:
+    get:
+      operationId: listIncidentAlerts
+      summary: Alertes rattachées à un incident, avec le critère de rattachement
+      tags:
+      - Incidents
+      x-baolsec-roles: *id012
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IncidentAlert'
+        '401': *id010
+        '403': *id011
+        '404': *id014
+      parameters: *id013
+  /sources/{source_id}/credentials/cert:
+    post:
+      operationId: addSourceCertificate
+      summary: Enregistrer l'empreinte SHA-256 du certificat client d'une source Syslog TLS
+      tags:
+      - Sources
+      x-baolsec-roles:
+      - administrateur
+      x-baolsec-access: ecriture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credential_id:
+                    type: string
+                    format: uuid
+                  cert_fingerprint:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+        '401': *id010
+        '403': *id011
+        '404': *id014
+        '409':
+          description: Empreinte déjà enregistrée ou deux identifiants actifs
+        '422':
+          description: Empreinte invalide ou source non Syslog
+      description: BaolSec ne génère ni ne conserve de clé privée. Le modèle de confiance des certificats (F-2)
+        reste en attente de décision.
+      parameters: *id015
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - cert_fingerprint
+              properties:
+                cert_fingerprint:
+                  type: string
+                  description: '64 caractères hexadécimaux, avec ou sans « : »'
+  /coverage/history:
+    get:
+      operationId: listCoverageHistory
+      summary: Historique des changements d'état de couverture
+      tags:
+      - Couverture
+      x-baolsec-roles: *id012
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    source_id:
+                      type: string
+                      format: uuid
+                    source_name:
+                      type: string
+                    from_state:
+                      $ref: '#/components/schemas/CoverageStateValue'
+                    to_state:
+                      $ref: '#/components/schemas/CoverageStateValue'
+                    reason:
+                      type: string
+                    changed_at:
+                      type: string
+                      format: date-time
+        '401': *id010
+        '403': *id011
+      parameters:
+      - name: source_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 50
+  /search/events:
+    post:
+      operationId: luceneSearchEvents
+      summary: Recherche Lucene dans l'index events
+      tags:
+      - Recherche
+      x-baolsec-roles: *id012
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  hits:
+                    type: array
+                    items:
+                      type: object
+        '401': *id010
+        '403': *id011
+        '400':
+          description: Requête Lucene invalide
+        '503':
+          description: OpenSearch indisponible
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                q:
+                  type: string
+                  maxLength: 2000
+                  default: '*'
+                size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                from:
+                  type: integer
+                  minimum: 0
+  /search/alerts:
+    post:
+      operationId: luceneSearchAlerts
+      summary: Recherche Lucene dans l'index alerts
+      tags:
+      - Recherche
+      x-baolsec-roles: *id012
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  hits:
+                    type: array
+                    items:
+                      type: object
+        '401': *id010
+        '403': *id011
+        '400':
+          description: Requête Lucene invalide
+        '503':
+          description: OpenSearch indisponible
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                q:
+                  type: string
+                  maxLength: 2000
+                  default: '*'
+                size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                from:
+                  type: integer
+                  minimum: 0
+  /search/incidents:
+    post:
+      operationId: luceneSearchIncidents
+      summary: Recherche Lucene dans l'index incidents
+      tags:
+      - Recherche
+      x-baolsec-roles: *id012
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  hits:
+                    type: array
+                    items:
+                      type: object
+        '401': *id010
+        '403': *id011
+        '400':
+          description: Requête Lucene invalide
+        '503':
+          description: OpenSearch indisponible
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                q:
+                  type: string
+                  maxLength: 2000
+                  default: '*'
+                size:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                from:
+                  type: integer
+                  minimum: 0
+  /system/health:
+    get:
+      operationId: getPlatformHealth
+      summary: 'État de la plateforme (EF-12) : services, PostgreSQL, OpenSearch, broker et retard des consommateurs'
+      tags:
+      - Supervision
+      x-baolsec-roles: *id012
+      x-baolsec-access: lecture
+      responses:
+        '200':
+          description: Succès
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - up
+                    - degraded
+                    - down
+                  checked_at:
+                    type: string
+                    format: date-time
+                  components:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        kind:
+                          type: string
+                          enum:
+                          - service
+                          - donnees
+                        status:
+                          type: string
+                          enum:
+                          - up
+                          - degraded
+                          - down
+                        latency_ms:
+                          type:
+                          - integer
+                          - 'null'
+                        detail: {}
+                  streams:
+                    type: array
+                    items:
+                      type: object
+        '401': *id010
+        '403': *id011
+      description: « down » si PostgreSQL ou le broker sont indisponibles ; « degraded » si un autre composant ne
+        répond pas.
 components:
   securitySchemes:
     bearerAuth:
@@ -1601,14 +1995,14 @@ components:
     From:
       name: from
       in: query
-      schema: &id010
+      schema: &id016
         type: string
         format: date-time
       description: Début de période (inclus)
     To:
       name: to
       in: query
-      schema: *id010
+      schema: *id016
       description: Fin de période (exclue)
     IdempotencyKey:
       name: Idempotency-Key
@@ -1673,7 +2067,7 @@ components:
         type:
           type: string
           format: uri-reference
-        title: &id011
+        title: &id017
           type: string
           minLength: 1
         status:
@@ -1688,8 +2082,8 @@ components:
             type: object
             additionalProperties: false
             properties:
-              field: *id011
-              message: *id011
+              field: *id017
+              message: *id017
             required:
             - field
             - message
@@ -1728,7 +2122,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        username: *id011
+        username: *id017
         password:
           type: string
           minLength: 1
@@ -1750,8 +2144,8 @@ components:
       type: object
       additionalProperties: false
       properties:
-        access_token: *id011
-        refresh_token: *id011
+        access_token: *id017
+        refresh_token: *id017
         token_type:
           const: Bearer
         expires_in:
@@ -1772,13 +2166,13 @@ components:
       additionalProperties: false
       properties:
         id: *id002
-        username: *id011
+        username: *id017
         email:
           type:
           - string
           - 'null'
           format: email
-        full_name: *id011
+        full_name: *id017
         role:
           $ref: '#/components/schemas/RoleName'
         is_active:
@@ -1793,7 +2187,7 @@ components:
           - string
           - 'null'
           format: date-time
-        created_at: *id010
+        created_at: *id016
       required:
       - id
       - username
@@ -1807,7 +2201,7 @@ components:
         username:
           type: string
           pattern: ^[a-z0-9._-]{3,64}$
-        full_name: *id011
+        full_name: *id017
         email:
           type: string
           format: email
@@ -1822,7 +2216,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        full_name: *id011
+        full_name: *id017
         email:
           type: string
           format: email
@@ -1838,7 +2232,7 @@ components:
           type: string
         permissions:
           type: array
-          items: *id011
+          items: *id017
       required:
       - name
       - permissions
@@ -1854,7 +2248,7 @@ components:
       additionalProperties: false
       properties:
         id: *id002
-        name: *id011
+        name: *id017
         source_type:
           $ref: '#/components/schemas/SourceType'
         transport:
@@ -1894,8 +2288,8 @@ components:
           type: integer
           minimum: 0
           maximum: 2
-        created_at: *id010
-        updated_at: *id010
+        created_at: *id016
+        updated_at: *id016
       required:
       - id
       - name
@@ -1909,7 +2303,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        name: *id011
+        name: *id017
         source_type:
           $ref: '#/components/schemas/SourceType'
         transport:
@@ -1921,7 +2315,7 @@ components:
           - direct
           - rejeu
           default: direct
-        host: *id011
+        host: *id017
         silence_threshold_s:
           type: integer
           minimum: 60
@@ -1946,8 +2340,8 @@ components:
       type: object
       additionalProperties: false
       properties:
-        name: *id011
-        host: *id011
+        name: *id017
+        host: *id017
         silence_threshold_s:
           type: integer
           minimum: 60
@@ -1980,7 +2374,7 @@ components:
         cert_fingerprint:
           type: string
           pattern: ^[0-9A-Fa-f:]{32,128}$
-        expires_at: *id010
+        expires_at: *id016
       required:
       - credential_type
       description: client_cert exige cert_fingerprint ; token génère un secret.
@@ -1997,7 +2391,7 @@ components:
           type:
           - string
           - 'null'
-        created_at: *id010
+        created_at: *id016
         expires_at:
           type:
           - string
@@ -2033,21 +2427,21 @@ components:
       type: object
       additionalProperties: false
       properties:
-        id: *id011
-        name: *id011
+        id: *id017
+        name: *id017
         description:
           type: string
         rule_type:
           enum:
           - simple
           - window
-        severity: *id012
+        severity: *id018
         is_enabled:
           type: boolean
         current_version:
           type: integer
           minimum: 1
-        updated_at: *id010
+        updated_at: *id016
       required:
       - id
       - name
@@ -2068,7 +2462,7 @@ components:
           format: uuid
         required_fields:
           type: array
-          items: *id011
+          items: *id017
       required:
       - source_type
     RuleDetail:
@@ -2089,10 +2483,10 @@ components:
       type: object
       additionalProperties: false
       properties:
-        name: *id011
+        name: *id017
         description:
           type: string
-        severity: *id012
+        severity: *id018
         definition_yaml:
           type: string
           minLength: 1
@@ -2114,9 +2508,9 @@ components:
         version:
           type: integer
           minimum: 1
-        checksum: *id011
-        created_by: *id011
-        created_at: *id010
+        checksum: *id017
+        created_by: *id017
+        created_at: *id016
         definition_yaml:
           type: string
       required:
@@ -2127,7 +2521,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        key: *id011
+        key: *id017
         value: {}
         updated_by:
           type:
@@ -2155,12 +2549,12 @@ components:
         seq:
           type: integer
           minimum: 1
-        received_at: *id010
-        service: *id011
-        original_stream: *id011
-        reason_code: *id011
-        reason: *id011
-        message_id: *id011
+        received_at: *id016
+        service: *id017
+        original_stream: *id017
+        reason_code: *id017
+        reason: *id017
+        message_id: *id017
         source_id:
           type:
           - string
@@ -2182,7 +2576,7 @@ components:
         seq:
           type: integer
           minimum: 1
-        received_at: *id010
+        received_at: *id016
         message:
           $ref: ../../shared/contracts/dlq_message/v1/schema.json
       required:
@@ -2195,9 +2589,9 @@ components:
       properties:
         id:
           type: integer
-        occurred_at: *id010
-        actor_username: *id011
-        action: *id011
+        occurred_at: *id016
+        actor_username: *id017
+        action: *id017
         target_type:
           type:
           - string
@@ -2240,7 +2634,7 @@ components:
           - string
           - 'null'
           format: uuid
-        status_changed_at: *id010
+        status_changed_at: *id016
         incident_id:
           type:
           - string
@@ -2277,7 +2671,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        event_id: *id013
+        event_id: *id019
         available:
           type: boolean
           description: false si l'événement a été purgé d'OpenSearch
@@ -2341,23 +2735,23 @@ components:
       additionalProperties: false
       properties:
         id: *id002
-        title: *id011
+        title: *id017
         status:
           $ref: '#/components/schemas/IncidentStatus'
-        severity: *id012
+        severity: *id018
         entities:
           type: object
           additionalProperties: false
           properties:
             user:
               type: array
-              items: *id011
+              items: *id017
             ip:
               type: array
-              items: *id011
+              items: *id017
             hosts:
               type: array
-              items: *id011
+              items: *id017
         alert_count:
           type: integer
           minimum: 1
@@ -2366,8 +2760,8 @@ components:
           - string
           - 'null'
           format: uuid
-        opened_at: *id010
-        last_activity_at: *id010
+        opened_at: *id016
+        last_activity_at: *id016
         closed_at:
           type:
           - string
@@ -2387,8 +2781,8 @@ components:
       properties:
         id:
           type: integer
-        occurred_at: *id010
-        recorded_at: *id010
+        occurred_at: *id016
+        recorded_at: *id016
         entry_type:
           enum:
           - event
@@ -2405,7 +2799,7 @@ components:
           type:
           - string
           - 'null'
-        summary: *id011
+        summary: *id017
         actor:
           type:
           - string
@@ -2432,10 +2826,10 @@ components:
           type: object
           additionalProperties: false
           properties:
-            user.name: *id011
-            source.ip: *id011
-            host.name: *id011
-            destination.ip: *id011
+            user.name: *id017
+            source.ip: *id017
+            host.name: *id017
+            destination.ip: *id017
         gap_seconds:
           type: integer
           minimum: 0
@@ -2466,13 +2860,13 @@ components:
       type: object
       additionalProperties: false
       properties:
-        alert_id: *id014
-        rule_id: *id011
-        severity: *id012
-        triggered_at: *id010
+        alert_id: *id020
+        rule_id: *id017
+        severity: *id018
+        triggered_at: *id016
         status:
           $ref: '#/components/schemas/AlertStatus'
-        attached_at: *id010
+        attached_at: *id016
         criteria:
           $ref: '#/components/schemas/CorrelationJustification'
       required:
@@ -2486,9 +2880,9 @@ components:
       additionalProperties: false
       properties:
         id: *id002
-        author: *id011
-        body: *id011
-        created_at: *id010
+        author: *id017
+        body: *id017
+        created_at: *id016
       required:
       - id
       - author
@@ -2528,10 +2922,10 @@ components:
       additionalProperties: false
       properties:
         source_id: *id002
-        source_name: *id011
+        source_name: *id017
         state:
           $ref: '#/components/schemas/CoverageStateValue'
-        state_since: *id010
+        state_since: *id016
         last_received_at:
           type:
           - string
@@ -2546,7 +2940,7 @@ components:
           type: integer
         affected_rule_ids:
           type: array
-          items: *id011
+          items: *id017
       required:
       - source_id
       - source_name
@@ -2574,7 +2968,7 @@ components:
                   $ref: '#/components/schemas/CoverageStateValue'
                 reason:
                   type: string
-                changed_at: *id010
+                changed_at: *id016
               required:
               - to_state
               - changed_at
@@ -2584,7 +2978,7 @@ components:
               type: object
               additionalProperties: false
               properties:
-                bucket_start: *id010
+                bucket_start: *id016
                 received_count:
                   type: integer
                 normalized_count:
@@ -2603,14 +2997,14 @@ components:
               type: object
               additionalProperties: false
               properties:
-                rule_id: *id011
-                rule_name: *id011
+                rule_id: *id017
+                rule_name: *id017
                 cause:
                   enum:
                   - silence
                   - flux_incomplet
                   - desactivee
-                since: *id010
+                since: *id016
                 resolved_at:
                   type:
                   - string

@@ -8,6 +8,7 @@ Matrice de droits :
   POST /sources             ✓      ✗        ✗
   PUT /sources/{id}         ✓      ✗        ✗
   DELETE /sources/{id}      ✓      ✗        ✗
+  POST /sources/{id}/credentials/cert  ✓  ✗  ✗   (A-13, C26)
   GET /rules                ✓      ✓        ✗
   POST /rules               ✓      ✗        ✗
   PUT /rules/{id}           ✓      ✗        ✗
@@ -30,7 +31,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from baolsec_api import auth as _auth
-from baolsec_api.main import create_app
 from baolsec_api.models import UserRole
 
 
@@ -72,11 +72,20 @@ FAKE_SOURCE = {
     "active": True, "silence_threshold_s": 300, "config": {},
     "created_at": NOW, "updated_at": NOW,
 }
+RULE_YAML = """id: TST-001
+name: Règle de test
+severity: moyenne
+type: simple
+category: [authentication]
+match:
+  event.category: authentication
+  event.outcome: failure
+message: "Échec pour {user.name}"
+"""
 FAKE_RULE = {
-    "id": uuid.uuid4(), "name": "R1", "description": None,
-    "logic": {}, "severity": "moyenne", "enabled": True,
-    "source_type": None, "threshold": None, "window_id": None,
-    "version": 1, "created_at": NOW, "updated_at": NOW,
+    "id": uuid.uuid4(), "name": "R1", "description": None, "rule_type": "simple",
+    "severity": "moyenne", "enabled": True, "version": 1, "definition_yaml": RULE_YAML,
+    "created_at": NOW, "updated_at": NOW,
 }
 FAKE_INCIDENT = {
     "id": uuid.uuid4(), "title": "Inc", "description": None,
@@ -102,9 +111,8 @@ FAKE_ALERT = {
 }
 
 
-@pytest.fixture(scope="module")
-def client():
-    app = create_app()
+@pytest.fixture
+def client(app):
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
@@ -122,7 +130,7 @@ class TestSourcesRBAC:
             assert client.get("/api/v1/sources").status_code == 401
 
     def test_post_only_admin(self, client):
-        payload = {"name": "FW-B", "type": "syslog"}
+        payload = {"name": "FW-B", "type": "firewall", "config": {"transport": "syslog"}}
         with patch("baolsec_api.database._pool", make_pool([FAKE_SOURCE])):
             assert client.post("/api/v1/sources", json=payload, headers=ADMIN).status_code == 201
             assert client.post("/api/v1/sources", json=payload, headers=ANALYST).status_code == 403
@@ -132,6 +140,25 @@ class TestSourcesRBAC:
         with patch("baolsec_api.database._pool", make_pool([FAKE_SOURCE])):
             assert client.delete(f"/api/v1/sources/{sid}", headers=ADMIN).status_code == 204
             assert client.delete(f"/api/v1/sources/{sid}", headers=ANALYST).status_code == 403
+
+    def test_post_cert_credential_only_admin(self, client):
+        """F-6 (C26) : test RBAC direct pour l'enregistrement d'un certificat client
+        (A-13) — jusqu'ici, seule la route /rotate était couverte par un test RBAC
+        explicite (test_post_only_admin ne vise pas /credentials/cert) ; l'audit a
+        relevé cette absence. ``add_cert_credential`` est protégée par la même
+        dépendance d'écriture (_WRITE, réservée ADMIN) que les autres routes
+        POST/DELETE sur /sources."""
+        sid = FAKE_SOURCE["id"]
+        row = {"transport": "syslog", "id": uuid.uuid4(), "created_at": NOW}
+        with patch("baolsec_api.database._pool", make_pool([row])):
+            assert client.post(
+                f"/api/v1/sources/{sid}/credentials/cert",
+                json={"cert_fingerprint": "aa" * 32}, headers=ADMIN,
+            ).status_code == 201
+            assert client.post(
+                f"/api/v1/sources/{sid}/credentials/cert",
+                json={"cert_fingerprint": "bb" * 32}, headers=ANALYST,
+            ).status_code == 403
 
 
 # ── Règles RBAC ───────────────────────────────────────────────────────────────
@@ -143,10 +170,19 @@ class TestRulesRBAC:
                 assert client.get("/api/v1/rules", headers=headers).status_code == 200
 
     def test_post_only_admin(self, client):
-        payload = {"name": "R2", "logic": {}}
-        with patch("baolsec_api.database._pool", make_pool([FAKE_RULE])):
+        payload = {"definition_yaml": RULE_YAML}
+        pool = make_pool([FAKE_RULE])
+        pool.connection().cursor().fetchone = AsyncMock(side_effect=[None, FAKE_RULE])
+        with patch("baolsec_api.database._pool", pool):
             assert client.post("/api/v1/rules", json=payload, headers=ADMIN).status_code == 201
             assert client.post("/api/v1/rules", json=payload, headers=ANALYST).status_code == 403
+
+    def test_enable_disable_only_admin(self, client):
+        rid = FAKE_RULE["id"]
+        with patch("baolsec_api.database._pool", make_pool([FAKE_RULE])):
+            for action in ("enable", "disable"):
+                assert client.post(f"/api/v1/rules/{rid}/{action}", headers=ADMIN).status_code == 204
+                assert client.post(f"/api/v1/rules/{rid}/{action}", headers=ANALYST).status_code == 403
 
     def test_delete_only_admin(self, client):
         rid = FAKE_RULE["id"]
@@ -232,5 +268,6 @@ class TestAuditLog:
 
     def test_no_audit_for_anonymous(self, client):
         """Les requêtes anonymes (401) ne génèrent pas d'entrée d'audit."""
-        resp = client.get("/api/v1/sources")
+        with patch("baolsec_api.database._pool", make_pool()):
+            resp = client.get("/api/v1/sources")
         assert resp.status_code == 401

@@ -1,0 +1,48 @@
+/* Page de connexion : panneau de présentation + formulaire. Jetons définis dans styles/app.css. */
+.login { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); background: var(--bg); }
+.login__aside { position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 36px 48px;
+  background: linear-gradient(160deg, rgba(6, 11, 22, 0.55), rgba(6, 11, 22, 0.94)), url('/assets/hero-network.webp') center / cover no-repeat;
+  border-right: 1px solid var(--line); }
+.login__back { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-weight: 500; width: fit-content; }
+.login__back:hover { color: var(--text); }
+.login__back svg { width: 16px; height: 16px; }
+.login__pitch { max-width: 460px; }
+.login__mark { width: 56px; height: 56px; border-radius: 14px; background: #f4f3ee; padding: 5px; margin-bottom: 22px; }
+.login__pitch h1 { font-family: var(--font-head); font-size: 36px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.login__pitch p { margin-top: 14px; color: var(--text-2); font-size: 16px; }
+.login__pitch ul { list-style: none; padding: 0; margin: 26px 0 0; display: grid; gap: 12px; }
+.login__pitch li { display: flex; gap: 10px; align-items: center; color: var(--text-2); }
+.login__pitch li svg { color: var(--accent); flex: none; }
+.login__foot { color: var(--text-3); font-size: 12.5px; }
+
+.login__main { display: grid; place-items: center; padding: 32px 24px; }
+.login__card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.login__card h2 { font-family: var(--font-head); font-size: 28px; font-weight: 700; }
+.login__lead { color: var(--text-2); margin-top: -8px; }
+.login__field { display: flex; flex-direction: column; gap: 7px; }
+.login__field > span { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.login__field .input { height: 46px; font-size: 15px; }
+.login__pw { position: relative; }
+.login__pw .input { padding-right: 48px; }
+.login__pw .btn { position: absolute; right: 4px; top: 4px; }
+.login__submit { height: 46px; font-size: 15px; margin-top: 4px; }
+.login__msg { padding: 11px 14px; border-radius: 10px; font-size: 13.5px; border: 1px solid; }
+.login__msg.error { background: rgba(255, 90, 118, 0.08); border-color: rgba(255, 90, 118, 0.35); color: #ffc2cc; }
+.login__msg.info { background: rgba(90, 169, 255, 0.08); border-color: rgba(90, 169, 255, 0.3); color: #cfe3ff; }
+.login__note { color: var(--text-3); font-size: 12.5px; text-align: center; }
+
+@media (max-width: 900px) {
+  .login { grid-template-columns: 1fr; }
+  .login__aside { padding: 24px; min-height: auto; gap: 24px; }
+  .login__pitch h1 { font-size: 26px; }
+  .login__pitch ul, .login__foot { display: none; }
+}
+
+/* Mouvement (neutralisé par « réduire les animations », voir styles/app.css) */
+.login__pitch > * { animation: fadeUp 0.5s var(--ease) both; }
+.login__pitch > :nth-child(2) { animation-delay: 0.06s; } .login__pitch > :nth-child(3) { animation-delay: 0.12s; }
+.login__pitch li { animation: fadeUp 0.45s var(--ease) both; }
+.login__pitch li:nth-child(1) { animation-delay: 0.2s; } .login__pitch li:nth-child(2) { animation-delay: 0.27s; } .login__pitch li:nth-child(3) { animation-delay: 0.34s; }
+.login__card { animation: scaleIn 0.4s var(--ease) 0.08s both; }
+.login__mark { transition: transform 0.4s var(--ease); }
+.login__mark:hover { transform: rotate(-6deg) scale(1.05); }

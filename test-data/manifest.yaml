@@ -1,2 +1,195 @@
-# Jeux de données publics : nom, source, version ou commit, empreinte.
-datasets: []
+version: 1
+datasets:
+  - id: linux-openssh
+    path: linux-openssh.log
+    format: text
+    source: logpai/loghub
+    revision: dd61d0952749ee7963bde24220d1be5ede023033
+    source_path: OpenSSH/OpenSSH_2k.log
+    sha256: 1e4912727fa88245113d41b16a0cd25ceadba7f931e1c406542885b91254264f
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: linux
+      directly_processable: true
+      minimum_normalized_rate: 1.0
+      expected_actions: [ssh_login, pam_auth]
+
+  - id: linux-syslog
+    path: linux-syslog.log
+    format: text
+    source: logpai/loghub
+    revision: dd61d0952749ee7963bde24220d1be5ede023033
+    source_path: Linux/Linux_2k.log
+    sha256: b3e20bc1afe732ab1bf3ed1de4bf9c809e4194e02f7dea911d918e5342e8e173
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: linux
+      directly_processable: true
+      minimum_normalized_rate: 0.999
+      expected_actions: [pam_auth]
+
+  - id: iptables
+    path: iptables.log
+    format: text
+    source: elastic/beats
+    revision: 06c96caae748e1757452aa81494753eb1e8cbdba
+    source_path: x-pack/filebeat/module/iptables/log/test/iptables.log
+    sha256: 935f5e36192c0acbf7b46b8c6433f1074a396b1974eaedddd66c322abf8dcb9f
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: linux
+      directly_processable: true
+      minimum_normalized_rate: 1.0
+      expected_actions: [connection_denied]
+
+  - id: iptables-ipv6
+    path: iptables-ipv6.log
+    format: text
+    source: elastic/beats
+    revision: 06c96caae748e1757452aa81494753eb1e8cbdba
+    source_path: x-pack/filebeat/module/iptables/log/test/ipv6.log
+    sha256: 56a0630ca7b4c8c5d9204286aa7aac241276a55365c75a7405e039bd1bcdebac
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: linux
+      directly_processable: true
+      minimum_normalized_rate: 1.0
+      expected_actions: [connection_logged]
+
+  - id: pfsense-bsd
+    path: pfsense-bsd.log
+    format: text
+    source: elastic/integrations
+    revision: 52ef5eab69b6e593adfe17a42c81f35bda6a2afe
+    source_path: packages/pfsense/data_stream/log/_dev/test/pipeline/test-pfsense-bsd.log
+    sha256: 50305fde1c67622d7738e467a736a5cc3bee157ea1007bf0273e58fa3678ab1a
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: firewall
+      directly_processable: true
+      expected_actions: [connection_denied, connection_allowed]
+
+  - id: pfsense-rfc5424
+    path: pfsense-rfc5424.log
+    format: text
+    source: elastic/integrations
+    revision: 52ef5eab69b6e593adfe17a42c81f35bda6a2afe
+    source_path: packages/pfsense/data_stream/log/_dev/test/pipeline/test-pfsense-syslog.log
+    sha256: e06781cbb88d91a54fd69060ba9c0dfcf22dae11c901e8f0cbd78a74b9bdf5fc
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: firewall
+      directly_processable: true
+      expected_actions: [connection_denied, connection_allowed]
+
+  - id: web-access
+    path: web-access.log
+    format: text
+    source: elastic/examples
+    revision: 6d86454ebb7a850bcd7e80abe86fe683370018a6
+    source_path: Common Data Formats/apache_logs/apache_logs
+    sha256: f15c31e905f86c7b4b6ab44aee74d0a2086dce89f010187d983edea7ef0364ef
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: http
+      directly_processable: true
+      minimum_normalized_rate: 1.0
+      expected_actions: [http_request]
+
+  - id: windows-ca-4624-4625
+    path: windows/ca_4624_4625.evtx
+    format: evtx
+    source: sbousseaden/EVTX-ATTACK-SAMPLES
+    revision: 4ceed2f4706daf601c212a8f91c113dd85349a2c
+    source_path: Credential Access/CA_4624_4625_LogonType2_LogonProc_chrome.evtx
+    sha256: 75f199b68d473172705bf874720b01820317fdd7aa4843545c98720dd6de197f
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: windows
+      directly_processable: false
+      conversion_output: windows-security.jsonl
+
+  - id: windows-lm-wmi-4624-4688
+    path: windows/lm_wmi_4624_4688.evtx
+    format: evtx
+    source: sbousseaden/EVTX-ATTACK-SAMPLES
+    revision: 4ceed2f4706daf601c212a8f91c113dd85349a2c
+    source_path: Lateral Movement/LM_WMI_4624_4688_TargetHost.evtx
+    sha256: 3ff3fcdb55c08ec0eaa39b25c1e02a205314f367bcedc662586bd063185ca41d
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: windows
+      directly_processable: false
+      conversion_output: windows-security.jsonl
+
+  - id: windows-ntlm-relay-4624-4688
+    path: windows/ntlm_relay_4624_4688.evtx
+    format: evtx
+    source: sbousseaden/EVTX-ATTACK-SAMPLES
+    revision: 4ceed2f4706daf601c212a8f91c113dd85349a2c
+    source_path: Privilege Escalation/NTLM2SelfRelay-med0x2e-security_4624_4688.evtx
+    sha256: 26fd9de9bc19b4af5308c30b51d2ca17b0518f8c89826fceb092c86a01f42b2b
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: windows
+      directly_processable: false
+      conversion_output: windows-security.jsonl
+
+  - id: windows-pth-4624
+    path: windows/pth_4624.evtx
+    format: evtx
+    source: sbousseaden/EVTX-ATTACK-SAMPLES
+    revision: 4ceed2f4706daf601c212a8f91c113dd85349a2c
+    source_path: Lateral Movement/LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx
+    sha256: bbfd87cacdd56a9135de1838666937cd6c74daba47b366bba0c11f95ce97f461
+    origin:
+      type: public-download
+      license: null
+    validation:
+      parser: windows
+      directly_processable: false
+      conversion_output: windows-security.jsonl
+
+  - id: windows-security
+    path: windows-security.jsonl
+    format: jsonl
+    source: null
+    revision: null
+    source_path: null
+    sha256: c212a587654c34265dd61f17542ed6abd5d9c73b9d84ce92da5750e9e2bd5363
+    origin:
+      type: derived
+      license: null
+      inputs:
+        - windows/ca_4624_4625.evtx
+        - windows/lm_wmi_4624_4688.evtx
+        - windows/ntlm_relay_4624_4688.evtx
+        - windows/pth_4624.evtx
+      conversion:
+        script: scripts/testing/evtx_to_fluentbit.py
+        dependency: python-evtx==0.8.1
+    validation:
+      parser: windows
+      directly_processable: true
+      minimum_normalized_rate: 1.0
+      expected_actions: [logon, process_start]

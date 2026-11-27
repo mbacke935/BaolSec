@@ -19,7 +19,7 @@ pytestmark = [pytest.mark.skipif(not ADMIN_DSN, reason="TEST_POSTGRES_DSN non d�
               pytest.mark.asyncio(loop_scope="function")]
 
 from incidents.alert_state import parse_alert, rule_uuid                      # noqa: E402
-from incidents.commands import CommandService, NotSupported                    # noqa: E402
+from incidents.commands import CommandService                    # noqa: E402
 from incidents.consumer import PostgresAlertSink                               # noqa: E402
 from incidents.repositories import Database, DatabaseUnavailable, UnknownRule  # noqa: E402
 from incidents.repositories import alerts as repo                              # noqa: E402
@@ -196,8 +196,9 @@ async def test_alerte_cloturee_non_assignable_puis_reouverte(db, database):
 async def test_commande_d_incident_non_prise_en_charge(db, database):
     cmd = command("clore", "x", uuid.uuid4(), {})
     cmd["target"] = {"incident_id": str(uuid.uuid4())}
-    with pytest.raises(NotSupported, match="C16"):
-        await CommandService(db).apply(cmd)
+    result = valid(await CommandService(db).apply(cmd))
+    assert result["result"] == "refusee"
+    assert result["error"]["code"] == "cible_introuvable"
 
 
 async def test_deux_analystes_agissent_en_meme_temps_un_seul_gagne(db, database):
@@ -237,10 +238,13 @@ async def test_le_compte_du_service_n_a_pas_plus_de_droits_que_necessaire(db):
 # ------------------------------------------------------------------ consultation
 
 def purge_2030(database) -> None:
-    """Supprime (compte administrateur) les alertes de test datées de 2030 : chaque test repart de six alertes connues."""
+    """Supprime les alertes de test de 2030 et leurs références avant chaque test."""
     period = "triggered_at >= '2030-01-01' AND triggered_at < '2031-01-01'"
     with psycopg.connect(database) as c:
-        c.execute(f"DELETE FROM incidents.incident_commands WHERE alert_id IN (SELECT alert_id FROM incidents.alert_state WHERE {period})")
+        alert_ids = f"SELECT alert_id FROM incidents.alert_state WHERE {period}"
+        c.execute(f"DELETE FROM incidents.incident_commands WHERE alert_id IN ({alert_ids})")
+        c.execute(f"DELETE FROM incidents.incident_alerts WHERE alert_id IN ({alert_ids})")
+        c.execute(f"DELETE FROM incidents.incident_timeline WHERE alert_id IN ({alert_ids})")
         c.execute(f"DELETE FROM incidents.alert_state WHERE {period}")
 
 

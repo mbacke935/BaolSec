@@ -28,6 +28,7 @@ from ..correlation import (
     DEFAULT_MAX_DURATION_HOURS,
     DEFAULT_WINDOW_MINUTES,
     IncidentContext,
+    apply_settings,
     correlate,
     extract_entities,
     incident_title,
@@ -49,12 +50,50 @@ class AlertSink(Protocol):
         """La destination répond (PostgreSQL joignable)."""
 
 
+SETTINGS_TTL_S = 60.0
+
+
 class PostgresAlertSink:
     def __init__(self, db: Database, *, window_minutes: int = DEFAULT_WINDOW_MINUTES,
-                 max_duration_hours: int = DEFAULT_MAX_DURATION_HOURS):
+                 max_duration_hours: int = DEFAULT_MAX_DURATION_HOURS, settings_ttl_s: float = SETTINGS_TTL_S):
         self._db = db
         self._window_minutes = window_minutes
         self._max_duration_hours = max_duration_hours
+        self._settings_ttl_s = settings_ttl_s
+        self._settings_loaded_at = float("-inf")
+
+    async def _refresh_settings(self, conn) -> None:
+        """Relit les paramètres de corrélation (config.settings, C3 3.8) au plus une fois par minute.
+
+        L'administrateur les modifie depuis l'interface ; ils s'appliquent aux alertes suivantes
+        sans redémarrage. En cas d'erreur de lecture, les valeurs courantes sont conservées.
+        """
+        if time.monotonic() - self._settings_loaded_at < self._settings_ttl_s:
+            return
+        self._settings_loaded_at = time.monotonic()
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT key, value FROM config.settings WHERE key LIKE 'correlation.%%'")
+                rows = await cur.fetchall()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("paramètres de corrélation illisibles, valeurs courantes conservées : %s", exc)
+            return
+        values = {}
+        for row in rows:
+            key, value = (row["key"], row["value"]) if isinstance(row, dict) else (row[0], row[1])
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    continue
+            values[key] = value
+        window = values.get("correlation.window_minutes")
+        if isinstance(window, int) and not isinstance(window, bool) and 1 <= window <= 1440:
+            self._window_minutes = window
+        duration = values.get("correlation.max_incident_hours")
+        if isinstance(duration, int) and not isinstance(duration, bool) and 1 <= duration <= 720:
+            self._max_duration_hours = duration
+        apply_settings(values.get("correlation.generic_values"), values.get("correlation.activity_chains"))
 
     async def record(self, alert: Alert) -> bool:
         async with self._db.connection() as conn:
@@ -65,6 +104,7 @@ class PostgresAlertSink:
 
     async def _correlate(self, conn, alert: Alert) -> None:
         """Corrélation C16 : rattache l'alerte à un incident existant ou en crée un."""
+        await self._refresh_settings(conn)
         entities = extract_entities(alert.doc)
 
         now = alert.triggered_at
@@ -79,7 +119,7 @@ class PostgresAlertSink:
         )
 
         if decision.action == "create":
-            title = incident_title(entities, alert.rule_code)
+            title = incident_title(entities, alert.rule_code, (alert.doc.get("rule") or {}).get("name"))
             await inc_repo.create_incident(
                 conn, incident_id=decision.incident_id, title=title,
                 severity=alert.severity, context=decision.new_context, opened_at=now,

@@ -36,6 +36,12 @@ def test_requete_illisible_408(norm):
     assert "http" in d and "method" not in d["http"].get("request", {})
 
 
+@pytest.mark.parametrize(("status", "outcome", "severity"), [(302, "success", "info"), (401, "failure", "faible"), (403, "failure", "faible")])
+def test_statuts_http_utiles_aux_regles(norm, status, outcome, severity):
+    d = norm("http", f'203.0.113.1 - - [02/Nov/2026:10:22:17 +0000] "GET /admin HTTP/1.1" {status} 0')
+    assert d["event"]["outcome"] == outcome and d["baolsec"]["severity"]["label"] == severity
+
+
 def test_connexion_api_reussie(norm):
     d = norm("http", '{"ts":"2026-11-02T10:31:04.250Z","app":"portal-api","event":"login_succeeded","user":"moussa","client_ip":"41.82.10.4","level":"INFO"}')
     assert d["event"]["action"] == "api_login" and d["event"]["outcome"] == "success"

@@ -53,8 +53,9 @@ def parse_filterlog(csv: str, observer_name: str | None, timestamp: datetime | N
         raise unparsable("adresses source ou destination illisibles dans filterlog")
 
     action, decision, verb = ACTIONS[act]
+    outcome = "failure" if action == "connection_denied" else "success"
     doc: dict = {"event": {"category": ["network"], "type": ["connection", decision], "action": action,
-                           "outcome": "unknown", "provider": "filterlog", "dataset": "pfsense.filterlog"}}
+                           "outcome": outcome, "provider": "filterlog", "dataset": "pfsense.filterlog"}}
     put(doc, "observer.name", observer_name)
     doc["observer"] = {**doc.get("observer", {}), "vendor": "Netgate", "product": "pfSense", "type": "firewall"}
     put(doc, "source.ip", src_ip)

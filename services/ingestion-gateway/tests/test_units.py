@@ -67,6 +67,39 @@ def test_meme_evenement_meme_identifiant():
     assert a[0]["event_id"] == b[0]["event_id"]
 
 
+def test_json_sans_timestamp_propre_collision_connue():
+    """A-04 (décision du 24/11/2026, option A) : comportement actuel conservé, documenté ici.
+
+    Un enregistrement JSON (ex. app.log sans champ ts/timestamp/@timestamp/time, cf.
+    normalizer/parsers/web.py::parse_app, qui tolère explicitement leur absence) ne porte
+    alors aucun horodatage propre dans son payload. Seul le champ `date` de l'agent (heure
+    de lecture) distingue les deux envois, et `date` est retiré du corps avant le hash.
+    Deux occurrences réellement distinctes, au contenu identique, obtiennent donc le même
+    event_id : ce n'est pas un défaut des sources C7 actuelles (aucune ne produit ce cas en
+    pratique aujourd'hui), mais une limite connue et acceptée du mécanisme pour toute source
+    JSON qui n'embarquerait pas son propre horodatage. Voir C3 3.1 et
+    docs/conception/C26_event_id_limite_json.md.
+    """
+    rec_json = {"event": "login_failed", "user": "alice", "reason": "mot de passe invalide"}
+    a, _ = http_records([{"date": 1, **rec_json}], LINUX, NOW, 65536, None)
+    b, _ = http_records([{"date": 2, **rec_json}], LINUX, "2026-11-05T11:00:00.000Z", 65536, None)
+    assert a[0]["payload_format"] == "json"
+    assert a[0]["event_id"] == b[0]["event_id"]
+
+
+def test_json_avec_timestamp_propre_diverge():
+    """Contre-exemple : dès que le payload JSON embarque son propre horodatage (ex. un futur
+    connecteur applicatif qui suit le format documenté dans web.py et renseigne `ts`), deux
+    occurrences distinctes obtiennent des event_id différents — le mécanisme actuel reste
+    donc sûr pour toute source qui respecte cette convention.
+    """
+    a, _ = http_records([{"date": 1, "ts": "2026-11-24T10:00:00Z", "event": "login_failed"}],
+                         LINUX, NOW, 65536, None)
+    b, _ = http_records([{"date": 2, "ts": "2026-11-24T10:05:00Z", "event": "login_failed"}],
+                         LINUX, "2026-11-05T11:00:00.000Z", 65536, None)
+    assert a[0]["event_id"] != b[0]["event_id"]
+
+
 def test_nom_agent():
     assert agent_name_from("Fluent-Bit/4.1.0") == "fluent-bit"
     assert agent_name_from(None) is None

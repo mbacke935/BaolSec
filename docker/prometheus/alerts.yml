@@ -1,0 +1,33 @@
+# Règles d'alerte de supervision technique (EF-12, C18). Visibles dans Prometheus (/alerts) et Grafana.
+groups:
+  - name: baolsec-plateforme
+    rules:
+      - alert: ServiceIndisponible
+        # 2 interrogations sans réponse à 15 s d'intervalle : indisponible en 30 s au plus (EF-12)
+        expr: up == 0
+        for: 30s
+        labels: {severity: critique}
+        annotations:
+          summary: "{{ $labels.job }} ne répond plus"
+          description: "Aucune réponse de {{ $labels.instance }} depuis au moins 30 s."
+      - alert: FileDeRejetNonVide
+        expr: sum(baolsec_dlq_messages) > 0
+        for: 5m
+        labels: {severity: elevee}
+        annotations:
+          summary: "{{ $value }} message(s) dans la file de rejet"
+          description: "Consulter Administration → File de rejet dans BaolSec, ou make dlq-list."
+      - alert: RetardConsommateur
+        expr: max by (stream, consumer) (baolsec_consumer_pending_messages) > 10000
+        for: 5m
+        labels: {severity: elevee}
+        annotations:
+          summary: "{{ $labels.consumer }} accumule du retard sur {{ $labels.stream }}"
+          description: "{{ $value }} messages en attente de traitement."
+      - alert: PasserelleRefusLots
+        expr: sum(rate(baolsec_gateway_rejections_total[5m])) > 1
+        for: 10m
+        labels: {severity: moyenne}
+        annotations:
+          summary: "La passerelle refuse des lots ou des événements"
+          description: "Vérifier les identifiants des sources et la file de rejet."

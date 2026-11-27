@@ -35,7 +35,7 @@ from .repositories import (
     insert_state_history,
     list_sources,
     upsert_coverage_state,
-    upsert_affected_rules,
+    sync_affected_rules,
     get_source_by_name,
 )
 
@@ -43,6 +43,19 @@ log = logging.getLogger(__name__)
 
 # Seuil de complétude : si moins de 80 % des événements reçus sont normalisés, état = FLUX_INCOMPLET.
 COMPLETENESS_THRESHOLD = 0.80
+
+
+def duree(seconds: float | int | None) -> str:
+    """Durée lisible pour les motifs affichés dans l'interface : « 45 s », « 10 min », « 2 h 5 min »."""
+    if seconds is None:
+        return "?"
+    s = int(round(seconds))
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{round(s / 60)} min"
+    h, m = divmod(round(s / 60), 60)
+    return f"{h} h {m} min" if m else f"{h} h"
 # Nombre minimal d'événements reçus pour évaluer la complétude (évite les faux positifs au démarrage).
 MIN_RECEIVED_FOR_COMPLETENESS = 10
 
@@ -59,16 +72,17 @@ def evaluate_state(
     normalized_count: int,
     silence_threshold_s: int,
     now: datetime,
+    last_processed_at: datetime | None = None,
 ) -> tuple[str, str]:
     """Calcule le nouvel état et la raison de la transition.
 
     Retourne (state, reason).
     """
     if not active:
-        return "DESACTIVEE", "source désactivée dans config"
+        return "DESACTIVEE", "source désactivée par un administrateur"
 
     if last_received_at is None:
-        return "INCONNUE", "aucun événement reçu"
+        return "INCONNUE", "aucun événement reçu depuis la déclaration de la source"
 
     age_s = (now - last_received_at).total_seconds()
     silent = age_s > silence_threshold_s
@@ -79,16 +93,29 @@ def evaluate_state(
         and received_count > 0
         and normalized_count / received_count < COMPLETENESS_THRESHOLD
     )
+    # EF-09 : la normalisation seule à l'arrêt → les événements bruts continuent d'arriver mais plus
+    # rien n'est traité. Les compteurs cumulés réagissent trop lentement (un long historique masque
+    # l'arrêt) : on compare donc aussi les horodatages du dernier reçu et du dernier traité.
+    stalled = (
+        not silent
+        and last_received_at is not None
+        and (last_processed_at is None or (last_received_at - last_processed_at).total_seconds() > silence_threshold_s)
+        and (now - (last_processed_at or last_received_at)).total_seconds() > silence_threshold_s
+    )
+    if stalled and not incomplete:
+        lag = (last_received_at - last_processed_at).total_seconds() if last_processed_at else None
+        return "FLUX_INCOMPLET", (f"événements reçus mais non traités depuis {duree(lag)}" if lag is not None
+                                  else "événements reçus mais aucun traité")
 
     if silent and incomplete:
         # Les deux problèmes ; on privilégie FLUX_INCOMPLET (plus informatif)
-        return "FLUX_INCOMPLET", f"silence depuis {age_s:.0f}s et complétude {normalized_count}/{received_count}"
+        return "FLUX_INCOMPLET", f"aucun événement depuis {duree(age_s)}, et seulement {normalized_count} traités sur {received_count} reçus (complétude {normalized_count}/{received_count})"
     if silent:
-        return "SILENCIEUSE", f"aucun événement depuis {age_s:.0f}s (seuil {silence_threshold_s}s)"
+        return "SILENCIEUSE", f"aucun événement depuis {duree(age_s)} (seuil de silence : {duree(silence_threshold_s)})"
     if incomplete:
-        return "FLUX_INCOMPLET", f"complétude {normalized_count}/{received_count} < {COMPLETENESS_THRESHOLD:.0%}"
+        return "FLUX_INCOMPLET", f"seulement {normalized_count} événements traités sur {received_count} reçus (complétude {normalized_count}/{received_count}, minimum {COMPLETENESS_THRESHOLD:.0%})"
 
-    return "ACTIVE", "source active et flux complet"
+    return "ACTIVE", "événements reçus et traités normalement"
 
 
 class SourceStateEvaluator:
@@ -150,6 +177,7 @@ class SourceStateEvaluator:
                 normalized_count=normalized_count,
                 silence_threshold_s=source.silence_threshold_s,
                 now=now,
+                last_processed_at=last_processed_at,
             )
 
             await upsert_coverage_state(
@@ -176,6 +204,13 @@ class SourceStateEvaluator:
                 log.info("source %s : %s → %s (%s)", source.name, prev_state, new_state, reason)
             else:
                 log.debug("source %s : état inchangé (%s)", source.name, new_state)
+
+            affected = await sync_affected_rules(
+                conn, source_id=source.id, source_type=getattr(source, "source_type", None),
+                state=new_state, now=now,
+            )
+            if affected and new_state != prev_state:
+                log.info("source %s : %d règle(s) privée(s) de données", source.name, len(affected))
 
             # Mettre à jour la gauge Prometheus
             for state in ("INCONNUE", "ACTIVE", "SILENCIEUSE", "FLUX_INCOMPLET", "DESACTIVEE"):

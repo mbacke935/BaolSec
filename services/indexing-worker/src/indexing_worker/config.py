@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Streams à consommer
     normalized_stream: str = "NORMALIZED_EVENTS"
-    normalized_durable: str = "indexing-normalized"
+    normalized_durable: str = "indexing-events"
     alerts_stream: str = "ALERTS"
     alerts_durable: str = "indexing-alerts"
     incidents_stream: str = "INCIDENTS"
@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     opensearch_url: str = "http://localhost:9200"
     opensearch_user: str = ""
     opensearch_password: str = ""
+    opensearch_ca_cert: str = ""
+    opensearch_verify_certs: bool = True
 
     # PostgreSQL (optionnel — pour enrichissement)
     postgres_dsn: str = ""

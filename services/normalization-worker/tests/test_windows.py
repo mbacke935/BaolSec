@@ -64,6 +64,11 @@ def test_heure_absente_heure_de_reception(norm):
     assert d["baolsec"]["timestamp_source"] == "received" and d["@timestamp"] == "2026-11-02T10:40:53.120Z"
 
 
+def test_heure_invalide_heure_de_reception(norm):
+    d = norm("windows", {**BASE, "TimeCreated": "invalide", "EventID": 4624, "EventData": {"TargetUserName": "admin"}})
+    assert d["baolsec"]["timestamp_source"] == "received"
+
+
 @pytest.mark.parametrize("payload", [json.dumps({"Computer": "PC"}), "pas du JSON", json.dumps([1, 2])])
 def test_enregistrements_refuses(normalizer, payload):
     with pytest.raises(ProcessingError) as err:

@@ -1,341 +1,63 @@
-# BaolSec – Docker Compose (C18)
-# Lance la totalité de la plateforme avec une seule commande : docker compose up -d
-# Secrets et paramètres non-secrets sont séparés : secrets dans .env (jamais versionné),
-# paramètres structurels dans ce fichier.
+# BaolSec — pile complète (C18) : docker compose up -d
 #
-# Réseaux :
-#   baolsec-data    : PostgreSQL, OpenSearch, NATS (aucun service public)
-#   baolsec-ingest  : passerelle + agents (accès broker uniquement)
-#   baolsec-backend : workers + API (accès data)
-#   baolsec-obs     : Prometheus, Grafana, Fluent Bit (accès à tout en lecture)
+# La pile applicative est définie une seule fois, dans infrastructure/compose/compose.yaml
+# (broker et sa topologie, PostgreSQL et ses migrations, OpenSearch, passerelle, normalisation,
+# détection, incidents, couverture, indexation, API, interface, sauvegardes). Ce fichier l'inclut et
+# ajoute la supervision (Prometheus, Grafana, EF-12).
+#
+# Avant le premier démarrage :
+#   cp .env.example .env        puis remplir chaque valeur (openssl rand -hex 24 pour les secrets)
+#   make gateway-dev            certificats et sources de développement (infrastructure/tls/dev/)
+#
+# Accès : interface https://localhost (certificat de développement), Grafana http://127.0.0.1:3001,
+# Prometheus http://127.0.0.1:9090. Les autres ports ne sont publiés que sur 127.0.0.1 (ES-04).
+#
+# Remplace l'ancien compose.yaml racine (C18), qui décrivait une seconde pile divergente : noms de
+# services différents de .env (nats/postgres au lieu de broker/postgresql), variables ignorées par
+# les services (NATS_URL, POSTGRES_DSN sans préfixe), détection désactivée (profil « todo ») et base
+# sans schéma (aucune migration lancée) : elle ne pouvait pas fonctionner.
 
-x-restart: &restart-policy
-  restart: unless-stopped
+name: baolsec
 
-x-logging: &fluent-logging
-  driver: fluentd
-  options:
-    fluentd-address: "localhost:24224"
-    fluentd-async: "true"
-    tag: "baolsec.{{.Name}}"
+include:
+  - path: infrastructure/compose/compose.yaml
+    env_file: .env
 
 services:
-
-  # ─────────────────────────────────────────────────────────────
-  # Infrastructure : broker, bases de données
-  # ─────────────────────────────────────────────────────────────
-
-  nats:
-    image: nats:2.15-alpine
-    <<: *restart-policy
-    command: >
-      -js
-      -sd /data
-      -m 8222
-      --auth ${NATS_TOKEN}
-    ports:
-      - "4222:4222"
-      - "8222:8222"
-    volumes:
-      - nats-data:/data
-    networks: [baolsec-data, baolsec-ingest, baolsec-backend]
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  postgres:
-    image: postgres:17-alpine
-    <<: *restart-policy
-    environment:
-      POSTGRES_USER: baolsec
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: baolsec
-      # Mots de passe des 6 comptes de service (C4 §2.2), posés par init.sh
-      SVC_API_PASSWORD: ${SVC_API_PASSWORD}
-      SVC_PASSERELLE_PASSWORD: ${SVC_PASSERELLE_PASSWORD}
-      SVC_NORMALISATION_PASSWORD: ${SVC_NORMALISATION_PASSWORD}
-      SVC_DETECTION_PASSWORD: ${SVC_DETECTION_PASSWORD}
-      SVC_INCIDENTS_PASSWORD: ${SVC_INCIDENTS_PASSWORD}
-      SVC_COUVERTURE_PASSWORD: ${SVC_COUVERTURE_PASSWORD}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./docker/postgres/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
-    networks: [baolsec-data]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U baolsec"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  opensearch:
-    image: opensearchproject/opensearch:2.19.0
-    <<: *restart-policy
-    environment:
-      discovery.type: single-node
-      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
-      DISABLE_SECURITY_PLUGIN: "true"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_PASSWORD}
-    volumes:
-      - opensearch-data:/usr/share/opensearch/data
-    networks: [baolsec-data, baolsec-backend]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:2.19.0
-    <<: *restart-policy
-    environment:
-      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
-      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
-    ports:
-      - "5601:5601"
-    depends_on:
-      opensearch:
-        condition: service_healthy
-    networks: [baolsec-data, baolsec-backend]
-
-  # ─────────────────────────────────────────────────────────────
-  # Collecte et normalisation
-  # ─────────────────────────────────────────────────────────────
-
-  gateway:
-    build:
-      context: ..
-      dockerfile: services/gateway/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      NATS_URL: nats://nats:4222
-      NATS_TOKEN: ${NATS_TOKEN}
-      METRICS_PORT: "9100"
-    ports:
-      - "5514:5514/udp"   # syslog UDP
-      - "5514:5514/tcp"   # syslog TCP
-      - "8080:8080"       # HTTP push
-    depends_on:
-      nats:
-        condition: service_healthy
-    networks: [baolsec-ingest, baolsec-data]
-    logging: *fluent-logging
-
-  normalizer:
-    build:
-      context: ..
-      dockerfile: services/normalizer/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      NATS_URL: nats://nats:4222
-      NATS_TOKEN: ${NATS_TOKEN}
-      METRICS_PORT: "9101"
-    depends_on:
-      nats:
-        condition: service_healthy
-    networks: [baolsec-data]
-    logging: *fluent-logging
-
-  enricher:
-    build:
-      context: ..
-      dockerfile: services/enricher/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      NATS_URL: nats://nats:4222
-      NATS_TOKEN: ${NATS_TOKEN}
-      METRICS_PORT: "9102"
-    depends_on:
-      nats:
-        condition: service_healthy
-    networks: [baolsec-data]
-    logging: *fluent-logging
-
-  # ─────────────────────────────────────────────────────────────
-  # Détection et incidents
-  # ─────────────────────────────────────────────────────────────
-
-  rule-engine:
-    build:
-      context: ..
-      dockerfile: services/rule-engine/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      NATS_URL: nats://nats:4222
-      NATS_TOKEN: ${NATS_TOKEN}
-      POSTGRES_DSN: postgresql://svc_detection:${SVC_DETECTION_PASSWORD}@postgres:5432/baolsec
-      METRICS_PORT: "9103"
-    depends_on:
-      nats:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    networks: [baolsec-data, baolsec-backend]
-    logging: *fluent-logging
-
-  incident-builder:
-    build:
-      context: ..
-      dockerfile: services/incident-builder/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      NATS_URL: nats://nats:4222
-      NATS_TOKEN: ${NATS_TOKEN}
-      POSTGRES_DSN: postgresql://svc_incidents:${SVC_INCIDENTS_PASSWORD}@postgres:5432/baolsec
-      COMMAND_TOKEN: ${COMMAND_TOKEN}
-      METRICS_PORT: "9104"
-    depends_on:
-      nats:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    networks: [baolsec-data, baolsec-backend]
-    logging: *fluent-logging
-
-  coverage-worker:
-    build:
-      context: ..
-      dockerfile: services/coverage-worker/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      COVERAGE_POSTGRES_DSN: postgresql://svc_couverture:${SVC_COUVERTURE_PASSWORD}@postgres:5432/baolsec
-      COVERAGE_BROKER_URL: nats://nats:4222
-      COVERAGE_BROKER_TOKEN: ${NATS_TOKEN}
-      COVERAGE_METRICS_PORT: "9105"
-    depends_on:
-      nats:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    networks: [baolsec-data, baolsec-backend]
-    logging: *fluent-logging
-
-  # ─────────────────────────────────────────────────────────────
-  # Plateforme : indexation, API, frontend
-  # ─────────────────────────────────────────────────────────────
-
-  indexing-worker:
-    build:
-      context: ..
-      dockerfile: services/indexing-worker/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      NATS_URL: nats://nats:4222
-      NATS_TOKEN: ${NATS_TOKEN}
-      OPENSEARCH_URL: http://opensearch:9200
-      METRICS_PORT: "9106"
-    depends_on:
-      nats:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      opensearch:
-        condition: service_healthy
-    networks: [baolsec-data, baolsec-backend]
-    logging: *fluent-logging
-
-  api:
-    build:
-      context: ..
-      dockerfile: services/baolsec-api/Dockerfile
-    <<: *restart-policy
-    env_file: .env
-    environment:
-      POSTGRES_DSN: postgresql://svc_api:${SVC_API_PASSWORD}@postgres:5432/baolsec
-      OPENSEARCH_URL: http://opensearch:9200
-      JWT_SECRET: ${JWT_SECRET}
-      COMMAND_TOKEN: ${COMMAND_TOKEN}
-      API_PORT: "8000"
-      METRICS_PORT: "9107"
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      opensearch:
-        condition: service_healthy
-    networks: [baolsec-backend, baolsec-data]
-    logging: *fluent-logging
-
-  frontend:
-    build:
-      context: ..
-      dockerfile: services/frontend/Dockerfile
-    <<: *restart-policy
-    environment:
-      VITE_API_URL: http://api:8000
-    ports:
-      - "3000:3000"
-    depends_on:
-      - api
-    networks: [baolsec-backend]
-    logging: *fluent-logging
-
-  # ─────────────────────────────────────────────────────────────
-  # Observabilité : Prometheus, Grafana, Fluent Bit
-  # ─────────────────────────────────────────────────────────────
-
-  fluent-bit:
-    image: fluent/fluent-bit:3.3
-    <<: *restart-policy
-    volumes:
-      - ./docker/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
-      - ./docker/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
-    ports:
-      - "24224:24224"
-      - "24224:24224/udp"
-    networks: [baolsec-obs, baolsec-data]
-
   prometheus:
-    image: prom/prometheus:v3.3.1
-    <<: *restart-policy
+    image: prom/prometheus:v3.2.1
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=30d"
-      - "--web.enable-admin-api"
     volumes:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
-    networks: [baolsec-obs, baolsec-backend, baolsec-data]
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+    networks: [internal]
 
   grafana:
-    image: grafana/grafana:11.6.1
-    <<: *restart-policy
+    image: grafana/grafana:11.5.2
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD manquant dans .env}
       GF_SERVER_ROOT_URL: http://localhost:3001
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/baolsec-plateforme.json
     volumes:
       - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     depends_on:
       - prometheus
-    networks: [baolsec-obs]
-
-networks:
-  baolsec-data:
-  baolsec-ingest:
-  baolsec-backend:
-  baolsec-obs:
+    restart: unless-stopped
+    networks: [internal]
 
 volumes:
-  nats-data:
-  postgres-data:
-  opensearch-data:
   prometheus-data:
   grafana-data:

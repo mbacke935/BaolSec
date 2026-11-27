@@ -7,6 +7,7 @@ Fournit :
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, HTTPException, status
@@ -47,8 +48,42 @@ def require_role(*roles: UserRole):
         if current.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Rôle requis : {', '.join(r.value for r in roles)}",
+                detail="Action réservée au rôle " + " ou ".join(
+                    {"ADMIN": "Administrateur", "ANALYST": "Analyste"}.get(r.value, r.value) for r in roles),
             )
         return current
 
     return _check
+
+
+async def paginate(
+    conn,
+    select_sql: str,
+    count_sql: str,
+    args: list,
+    limit: int,
+    offset: int,
+) -> dict:
+    """Exécute une requête paginée et retourne {items, total, limit, offset}."""
+    async with conn.cursor() as cur:
+        await cur.execute(count_sql, args)
+        row = await cur.fetchone()
+        total = _first(row)
+
+        await cur.execute(f"{select_sql} LIMIT %s OFFSET %s", args + [limit, offset])
+        rows = await cur.fetchall()
+        cols = [d.name for d in cur.description] if cur.description else []
+        # Le pool renvoie des tuples ; un curseur configuré en dict_row (ou un double de test)
+        # renvoie des dictionnaires : les deux formes sont acceptées.
+        items = [dict(r) if isinstance(r, Mapping) else dict(zip(cols, r)) for r in rows]
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+def _first(row) -> int:
+    """Première colonne d'une ligne COUNT(*), tuple ou dictionnaire."""
+    if not row:
+        return 0
+    value = row.get("count") if isinstance(row, Mapping) else row[0]
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+

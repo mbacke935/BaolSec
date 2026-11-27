@@ -8,9 +8,11 @@ lignes reconnues est mesuré par jeu (affiché avec pytest -s).
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 
 import pytest
+import yaml
 
 from baolsec_common.messaging import ProcessingError
 
@@ -21,21 +23,44 @@ RECEIVED = "2026-12-31T23:59:00.000Z"   # les lignes Syslog sans année sont dat
 pytestmark = pytest.mark.skipif(not DATA.is_dir(), reason="jeux publics absents : scripts/testing/fetch_public_datasets.sh")
 
 # fichier, type de source, format, part minimale de lignes normalisées, actions attendues
-DATASETS = [
-    ("linux-openssh.log", "linux", "text", 1.0, {"ssh_login", "pam_auth"}),
-    ("linux-syslog.log", "linux", "text", 0.999, {"pam_auth"}),   # une ligne « -- root[2421]: » sans programme
-    ("iptables.log", "linux", "text", 1.0, {"connection_denied"}),
-    ("iptables-ipv6.log", "linux", "text", 1.0, {"connection_logged"}),
-    ("pfsense-bsd.log", "firewall", "text", None, {"connection_denied", "connection_allowed"}),
-    ("pfsense-rfc5424.log", "firewall", "text", None, {"connection_denied", "connection_allowed"}),
-    ("web-access.log", "http", "text", 1.0, {"http_request"}),
-    ("windows-security.jsonl", "windows", "json", 1.0, {"logon", "process_start"}),
-]
+MANIFEST = yaml.safe_load((ROOT / "test-data" / "manifest.yaml").read_text(encoding="utf-8"))
+DATASETS = [entry for entry in MANIFEST["datasets"] if entry["validation"]["directly_processable"]]
 RESULTS: dict[str, dict] = {}
 
 
-@pytest.mark.parametrize("name,kind,fmt,min_rate,actions", DATASETS, ids=[d[0] for d in DATASETS])
-def test_jeu_public(normalizer, name, kind, fmt, min_rate, actions):
+def test_manifeste_couvre_les_douze_artefacts():
+    """Le manifeste est l'unique inventaire : présence, intégrité et chaîne EVTX sont vérifiées."""
+    entries = MANIFEST["datasets"]
+    assert MANIFEST["version"] == 1 and len(entries) == 12
+    assert len({entry["id"] for entry in entries}) == len({entry["path"] for entry in entries}) == 12
+    for entry in entries:
+        path = DATA / entry["path"]
+        assert path.is_file(), f"dataset absent : {entry['path']}"
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == entry["sha256"], entry["path"]
+        validation = entry["validation"]
+        assert validation["parser"] in {"linux", "firewall", "http", "windows"}
+        if entry["origin"]["type"] == "public-download":
+            assert entry["format"] in {"text", "evtx"}
+            assert all(entry[key] for key in ("source", "revision", "source_path"))
+        else:
+            assert entry["origin"]["type"] == "derived"
+            assert entry["source"] is entry["revision"] is entry["source_path"] is None
+            assert entry["origin"]["conversion"]["script"] == "scripts/testing/evtx_to_fluentbit.py"
+    evtx = [entry for entry in entries if entry["format"] == "evtx"]
+    assert len(evtx) == 4
+    assert all(not entry["validation"]["directly_processable"] for entry in evtx)
+    assert {entry["validation"]["conversion_output"] for entry in evtx} == {"windows-security.jsonl"}
+    derived = next(entry for entry in entries if entry["path"] == "windows-security.jsonl")
+    assert derived["format"] == "jsonl" and derived["validation"]["directly_processable"]
+    assert set(derived["origin"]["inputs"]) == {entry["path"] for entry in evtx}
+
+
+@pytest.mark.parametrize("entry", DATASETS, ids=[d["id"] for d in DATASETS])
+def test_jeu_public(normalizer, entry):
+    name, kind = entry["path"], entry["validation"]["parser"]
+    fmt = "json" if entry["format"] == "jsonl" else entry["format"]
+    min_rate = entry["validation"].get("minimum_normalized_rate")
+    actions = set(entry["validation"]["expected_actions"])
     path = DATA / name
     if not path.exists():
         pytest.skip(f"{name} absent")

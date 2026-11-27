@@ -28,5 +28,5 @@ RUN uv pip install --system --no-cache /app/services/incident-builder
 RUN adduser --disabled-password --gecos "" baolsec
 USER baolsec
 
-EXPOSE 9104
+EXPOSE 9000
 CMD ["python", "-m", "incidents.main"]

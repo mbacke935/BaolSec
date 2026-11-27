@@ -110,6 +110,28 @@ async def lock_incident(conn: psycopg.AsyncConnection, incident_id: uuid.UUID) -
 
 # ------------------------------------------------------------------ incidents : écriture
 
+async def create_outbox_event(
+    conn: psycopg.AsyncConnection,
+    *,
+    incident_id: uuid.UUID,
+    event_type: str,
+    payload: dict,
+) -> None:
+    """Insère un événement Outbox dans la même transaction que la création/modification de l'incident.
+
+    Le publisher indépendant (OutboxPublisher) lira les lignes non publiées et les enverra
+    sur NATS/INCIDENTS avant de marquer published_at.  L'appelant ne doit PAS committer
+    la transaction avant le retour de cette fonction.
+
+    ``event_type`` : 'created' | 'updated'
+    """
+    await conn.execute(
+        "INSERT INTO incidents.incident_outbox (incident_id, event_type, payload) "
+        "VALUES (%s, %s, %s)",
+        (incident_id, event_type, Jsonb(payload)),
+    )
+
+
 async def create_incident(
     conn: psycopg.AsyncConnection,
     *,
@@ -119,18 +141,33 @@ async def create_incident(
     context: IncidentContext,
     opened_at: datetime,
 ) -> IncidentRow:
-    """Crée un incident avec le statut « ouvert »."""
+    """Crée un incident avec le statut « ouvert » et insère un événement Outbox dans la même transaction."""
     ctx = Jsonb(context.to_dict())
     await conn.execute(
         "INSERT INTO incidents.incidents (id, title, status, severity, correlation_context, opened_at, last_activity_at) "
         "VALUES (%s, %s, 'ouvert'::incidents.incident_status, %s::config.severity, %s, %s, %s)",
         (incident_id, title, severity, ctx, opened_at, opened_at),
     )
-    return IncidentRow(
+    row = IncidentRow(
         id=incident_id, title=title, status="ouvert", severity=severity,
         correlation_context=context.to_dict(), opened_at=opened_at,
         last_activity_at=opened_at, closed_at=None, assigned_to=None,
     )
+    await create_outbox_event(
+        conn,
+        incident_id=incident_id,
+        event_type="created",
+        payload={
+            "incident_id": str(incident_id),
+            "title": title,
+            "state": "ouvert",
+            "severity": severity,
+            "opened_at": opened_at.isoformat(),
+            "closed_at": None,
+            "last_activity_at": opened_at.isoformat(),
+        },
+    )
+    return row
 
 
 async def update_incident(
@@ -141,10 +178,10 @@ async def update_incident(
     context: IncidentContext | None = None,
     last_activity_at: datetime | None = None,
     status: str | None = None,
-    closed_at: datetime | None = None,
+    closed_at: datetime | None | type[_UNSET] = _UNSET,
     assigned_to: uuid.UUID | None | type[_UNSET] = _UNSET,
 ) -> None:
-    """Met à jour un ou plusieurs champs de l'incident (déjà verrouillé)."""
+    """Met à jour un ou plusieurs champs de l'incident (déjà verrouillé) et insère un événement Outbox."""
     sets: list[str] = []
     params: list = []
     if severity is not None:
@@ -159,7 +196,8 @@ async def update_incident(
     if status is not None:
         sets.append("status = %s::incidents.incident_status")
         params.append(status)
-    if closed_at is not None:
+    if closed_at is not _UNSET:
+        # None efface la date de clôture (réouverture) : contrainte « clos ⇔ closed_at renseigné ».
         sets.append("closed_at = %s")
         params.append(closed_at)
     if assigned_to is not _UNSET:
@@ -171,6 +209,23 @@ async def update_incident(
     await conn.execute(
         f"UPDATE incidents.incidents SET {', '.join(sets)} WHERE id = %s", params
     )
+    # Lire l'état courant pour construire le snapshot Outbox.
+    updated = await get_incident(conn, incident_id)
+    if updated is not None:
+        await create_outbox_event(
+            conn,
+            incident_id=incident_id,
+            event_type="updated",
+            payload={
+                "incident_id": str(updated.id),
+                "title": updated.title,
+                "state": updated.status,
+                "severity": updated.severity,
+                "opened_at": updated.opened_at.isoformat(),
+                "closed_at": updated.closed_at.isoformat() if updated.closed_at else None,
+                "last_activity_at": updated.last_activity_at.isoformat(),
+            },
+        )
 
 
 # ------------------------------------------------------------------ incident_alerts
@@ -227,6 +282,59 @@ async def add_timeline_entry(
          Jsonb(justification) if justification else None, actor_id),
     )
     return (await cur.fetchone())[0]
+
+
+# ------------------------------------------------------------------ commandes et commentaires
+
+async def insert_incident_command(
+    conn: psycopg.AsyncConnection,
+    *,
+    command_id: uuid.UUID,
+    command_type: str,
+    incident_id: uuid.UUID,
+    issued_by: uuid.UUID,
+    payload: dict,
+    result: str,
+    error: str | None,
+    at: datetime,
+) -> None:
+    """Enregistre une commande d'incident et son résultat (idempotence par command_id, C4 incident_commands).
+
+    Pendant de alerts.insert_command pour les incidents : la commande et l'état qu'elle modifie sont
+    écrits dans la même transaction que la décision.
+    """
+    await conn.execute(
+        "INSERT INTO incidents.incident_commands (command_id, command_type, incident_id, issued_by, payload, "
+        "result, error, created_at, completed_at) VALUES (%s, %s::incidents.command_type, %s, %s, %s, "
+        "%s::incidents.command_result, %s, %s, %s)",
+        (command_id, command_type, incident_id, issued_by, Jsonb(payload), result, error, at, at),
+    )
+
+
+async def add_comment(
+    conn: psycopg.AsyncConnection,
+    *,
+    incident_id: uuid.UUID,
+    author_id: uuid.UUID,
+    body: str,
+    created_at: datetime,
+) -> uuid.UUID:
+    """Ajoute un commentaire d'analyste à l'incident (incidents.incident_comments). Retourne son identifiant."""
+    cur = await conn.execute(
+        "INSERT INTO incidents.incident_comments (incident_id, author_id, body, created_at) "
+        "VALUES (%s, %s, %s, %s) RETURNING id",
+        (incident_id, author_id, body, created_at),
+    )
+    return (await cur.fetchone())[0]
+
+
+async def username_of(conn: psycopg.AsyncConnection, user_id: uuid.UUID | None) -> str | None:
+    """Nom d'utilisateur (colonne lisible par svc_incidents, 0005_comptes.sql) pour les libellés de chronologie."""
+    if user_id is None:
+        return None
+    cur = await conn.execute("SELECT username FROM acces.users WHERE id = %s", (user_id,))
+    row = await cur.fetchone()
+    return row[0] if row else None
 
 
 # ------------------------------------------------------------------ consultation

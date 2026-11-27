@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir uv==0.7.3
 
-COPY shared/python-common /app/shared/python-common
-RUN uv pip install --system --no-cache /app/shared/python-common[nats]
+COPY shared/python-common /shared/python-common
+RUN uv pip install --system --no-cache /shared/python-common[nats]
 
 COPY services/coverage-worker /app/service
 RUN uv pip install --system --no-cache /app/service
@@ -18,5 +18,5 @@ RUN uv pip install --system --no-cache /app/service
 RUN adduser --disabled-password --gecos "" baolsec
 USER baolsec
 
-EXPOSE 9105
+EXPOSE 9001
 CMD ["python", "-m", "coverage.main"]

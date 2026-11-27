@@ -14,7 +14,7 @@
       "denied"
     ],
     "action": "connection_denied",
-    "outcome": "unknown",
+    "outcome": "failure",
     "provider": "filterlog",
     "dataset": "pfsense.filterlog",
     "created": "2026-11-02T10:27:56.180Z",

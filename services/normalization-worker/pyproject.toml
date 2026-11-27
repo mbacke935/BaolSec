@@ -14,10 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "jsonschema==4.26.0", "rfc3339-validator==0.1.4"]
-
-[tool.uv.sources]
-baolsec-common = { path = "../../shared/python-common", editable = true }
+dev = ["pytest", "pytest-asyncio", "jsonschema==4.26.0", "rfc3339-validator==0.1.4", "PyYAML==6.0.3", "python-evtx==0.8.1"]
 
 [build-system]
 requires = ["hatchling"]
@@ -31,3 +28,6 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.uv.sources]
+baolsec-common = { path = "../../shared/python-common", editable = true }

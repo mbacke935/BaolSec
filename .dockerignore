@@ -1,0 +1,16 @@
+# Contexte de construction des services (racine du dépôt) : seuls les dossiers copiés par les
+# Dockerfile sont envoyés au moteur Docker. Sans cette liste, .env, .git, les environnements
+# virtuels locaux et la documentation partaient dans chaque construction (plus de 100 Mo).
+*
+!rules
+!shared
+!services
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+**/.env
+**/.env.*

@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(not ADMIN_DSN, reason="TEST_POSTGRES_DSN non dé
 TABLES = {
     "acces": {"roles", "permissions", "role_permissions", "users", "user_sessions", "audit_log"},
     "config": {"sources", "source_credentials", "rules", "rule_versions", "rule_requirements", "settings"},
-    "incidents": {"alert_state", "incidents", "incident_alerts", "incident_timeline", "incident_comments", "incident_commands"},
+    "incidents": {"alert_state", "incidents", "incident_alerts", "incident_timeline", "incident_comments", "incident_commands", "incident_outbox"},
     "couverture": {"coverage_state", "coverage_state_history", "coverage_stats", "coverage_affected_rules", "coverage_batches"},
 }
 
@@ -121,7 +121,10 @@ def test_retour_arriere_puis_reapplication(url):
         assert c.execute("SELECT count(*) FROM pg_namespace WHERE nspname = ANY(%s)", (list(TABLES),)).fetchone()[0] == 0
     alembic("upgrade head", url)
     with psycopg.connect(url) as c:
-        assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0005"
+        # Tête de la chaîne : la révision la plus récente du dépôt (et non un numéro figé, qui
+        # devenait faux à chaque nouvelle migration : 0007, puis 0008 et 0009 en C26).
+        head = max(f.name[:4] for f in (DB_DIR / "migrations" / "versions").glob("[0-9][0-9][0-9][0-9]_*.py"))
+        assert c.execute("SELECT version_num FROM alembic_version").fetchone()[0] == head
 
 
 # ---------------------------------------------------------------- contraintes (C4 4.5)
@@ -242,3 +245,31 @@ def test_copie_du_referentiel_et_lecture_par_les_services(url, tmp_path):
         c.execute("SET ROLE svc_normalisation")
         row = next(r for r in c.execute(NORMALIZER_QUERY).fetchall() if r[0] == sid)
         assert "srv-test" in row and "elevee" in row
+
+
+# ---------------------------------------------------------------- C26 : migrations 0008 et 0009
+
+def test_metadonnees_de_source_0008(conn):
+    """Colonnes lues et écrites par l'API (GET/POST /sources) : absentes avant 0008, d'où une erreur 500."""
+    sid = source(conn)
+    conn.execute("UPDATE config.sources SET hostname = 'web01', ip_address = '10.0.0.5', environment = 'production', "
+                 "tags = ARRAY['dmz'], responsible = 'SOC' WHERE id = %s", (sid,))
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute("UPDATE config.sources SET environment = 'inconnu' WHERE id = %s", (sid,))
+
+
+def test_meme_jeton_actif_deux_fois_refuse_0009(conn):
+    s1, s2 = source(conn), source(conn)
+    conn.execute("INSERT INTO config.source_credentials (source_id, credential_type, secret_hash) "
+                 "VALUES (%s, 'token', 'h-commun')", (s1,))
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute("INSERT INTO config.source_credentials (source_id, credential_type, secret_hash) "
+                     "VALUES (%s, 'token', 'h-commun')", (s2,))
+
+
+def test_jeton_revoque_ne_bloque_pas_0009(conn):
+    s1, s2 = source(conn), source(conn)
+    conn.execute("INSERT INTO config.source_credentials (source_id, credential_type, secret_hash, revoked_at) "
+                 "VALUES (%s, 'token', 'h-revoque', now())", (s1,))
+    conn.execute("INSERT INTO config.source_credentials (source_id, credential_type, secret_hash) "
+                 "VALUES (%s, 'token', 'h-revoque')", (s2,))

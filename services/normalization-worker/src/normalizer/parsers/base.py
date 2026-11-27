@@ -93,7 +93,11 @@ _RFC5424 = re.compile(
 # Horodatage ISO 8601 en tête de ligne (rsyslog d'Ubuntu 24.04 : 2026-11-05T10:00:00.123456+00:00)
 _ISO = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))\s+(?P<rest>.*)$", re.S)
 # RFC 3164 : Nov  5 10:00:00 (année et fuseau absents)
-_BSD = re.compile(r"^(?P<mon>[A-Z][a-z]{2}) +(?P<day>\d{1,2}) (?P<time>\d{2}:\d{2}:\d{2})(?:\.\d+)?\s+(?P<rest>.*)$", re.S)
+_BSD = re.compile(
+    r"^(?P<mon>[A-Za-z]{3}) +(?P<day>\d{1,2}) "
+    r"(?P<time>\d{2}:\d{2}:\d{2})(?:\.\d+)?\s+(?P<rest>.*)$",
+    re.S,
+)
 # Programme : sshd[1842]:  sshd(pam_unix)[19939]:  kernel:  filterlog[3012]:
 _TAG = re.compile(r"^(?P<prog>[^\s\[:]+?(?:\([^)]*\))?)(?:\[(?P<pid>\d+)\])?: ?(?P<msg>.*)$", re.S)
 
@@ -126,7 +130,7 @@ def bsd_timestamp(mon: str, day: str, hms: str, received: datetime, tz: tzinfo) 
     Un horodatage de plus de 2 jours dans le futur appartient à l'année précédente
     (ligne de décembre reçue en janvier).
     """
-    month = MONTHS.get(mon)
+    month = MONTHS.get(mon.title())
     if not month:
         return None
     h, m, s = (int(x) for x in hms.split(":"))
@@ -172,6 +176,8 @@ def parse_syslog(line: str, received: datetime, tz: tzinfo) -> SyslogLine | None
         if not m:
             return None
         ts, rest = bsd_timestamp(m["mon"], m["day"], m["time"], received, tz), m["rest"]
+        if ts is None:
+            return None
 
     # Après l'horodatage : « hôte programme[pid]: message », l'hôte pouvant manquer (pfSense).
     # Le nom d'hôte ne contient ni espace ni « [ » ni « : » : si le premier mot est suivi d'une

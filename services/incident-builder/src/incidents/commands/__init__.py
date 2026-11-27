@@ -32,6 +32,7 @@ INCIDENT_TRANSITIONS: dict[str, set[str]] = {
     "clos":     {"en_cours"},
 }
 INCIDENT_STATUSES = frozenset({"ouvert", "en_cours", "clos"})
+STATUS_LABELS = {"ouvert": "ouvert", "en_cours": "en cours", "clos": "clos"}
 
 
 def iso(t: datetime) -> str:
@@ -152,15 +153,19 @@ class CommandService:
             await inc_repo.update_incident(conn, inc.id, status=target, closed_at=closed_at, last_activity_at=now)
             await inc_repo.add_timeline_entry(
                 conn, incident_id=inc.id, occurred_at=now, entry_type="status_change",
-                summary=f"Statut : {inc.status} → {target}", actor_id=issuer,
+                summary=f"Statut : {STATUS_LABELS[inc.status]} → {STATUS_LABELS[target]}", actor_id=issuer,
             )
 
         elif ctype == "commenter":
             body = payload["body"]
-            await inc_repo.add_comment(conn, incident_id=inc.id, author_id=issuer, body=body, created_at=now)
+            comment_id = await inc_repo.add_comment(conn, incident_id=inc.id, author_id=issuer, body=body,
+                                                    created_at=now)
+            await inc_repo.update_incident(conn, inc.id, last_activity_at=now)
+            # Le texte est repris dans la chronologie (EF-08) : l'interface l'affiche échappé (ES-06).
             await inc_repo.add_timeline_entry(
                 conn, incident_id=inc.id, occurred_at=now, entry_type="comment",
-                summary=f"Commentaire ajouté", actor_id=issuer,
+                summary="Commentaire ajouté", actor_id=issuer,
+                justification={"comment_id": str(comment_id), "body": body},
             )
 
         elif ctype == "clore":
@@ -169,7 +174,8 @@ class CommandService:
             await inc_repo.update_incident(conn, inc.id, status="clos", closed_at=now, last_activity_at=now)
             await inc_repo.add_timeline_entry(
                 conn, incident_id=inc.id, occurred_at=now, entry_type="status_change",
-                summary=f"Incident clos", actor_id=issuer,
+                summary="Incident clos", actor_id=issuer,
+                justification={"reason": payload["reason"]} if payload.get("reason") else None,
             )
 
         elif ctype == "rouvrir":
@@ -178,7 +184,8 @@ class CommandService:
             await inc_repo.update_incident(conn, inc.id, status="en_cours", closed_at=None, last_activity_at=now)
             await inc_repo.add_timeline_entry(
                 conn, incident_id=inc.id, occurred_at=now, entry_type="status_change",
-                summary=f"Incident rouvert (clos → en_cours)", actor_id=issuer,
+                summary="Incident rouvert (clos → en cours)", actor_id=issuer,
+                justification={"reason": payload["reason"]} if payload.get("reason") else None,
             )
 
         elif ctype == "assigner":
@@ -190,7 +197,7 @@ class CommandService:
                 if state is False:
                     raise Refused("donnees_invalides", f"compte de l'analyste {assignee} désactivé")
             await inc_repo.update_incident(conn, inc.id, assigned_to=assignee, last_activity_at=now)
-            label = str(assignee) if assignee else "personne"
+            label = (await inc_repo.username_of(conn, assignee) or str(assignee)) if assignee else "personne"
             await inc_repo.add_timeline_entry(
                 conn, incident_id=inc.id, occurred_at=now, entry_type="status_change",
                 summary=f"Assigné à {label}", actor_id=issuer,

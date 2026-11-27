@@ -1,5 +1,5 @@
 -- Schéma couverture (C4 4.4, 5.4) — écrivain : service Couverture
-CREATE SCHEMA couverture;
+CREATE SCHEMA IF NOT EXISTS couverture;
 CREATE TYPE couverture.state AS ENUM ('INCONNUE', 'ACTIVE', 'SILENCIEUSE', 'FLUX_INCOMPLET', 'DESACTIVEE');
 CREATE TYPE couverture.cause AS ENUM ('silence', 'flux_incomplet', 'desactivee');
 

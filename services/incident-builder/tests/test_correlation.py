@@ -392,3 +392,25 @@ class TestHelpers:
         t = incident_title(e, "FW-001")
         assert "FW-001" in t
         assert "10.0.8.31" in t
+
+    def test_incident_title_uses_rule_name(self):
+        e = Entities(user="alice", source_ip="203.0.113.9")
+        assert incident_title(e, "AUTH-001", "Force brute sur un compte") == "Force brute sur un compte — alice · 203.0.113.9"
+        assert incident_title(Entities(), "AUTH-001", None) == "AUTH-001"
+
+
+class TestParametresDeCorrelation:
+    """config.settings (C3 3.8) : valeurs génériques et enchaînements appliqués sans redémarrage."""
+
+    def test_apply_settings(self):
+        import incidents.correlation as corr
+        saved = (corr.GENERIC_VALUES, corr.ACTIVITY_CHAINS)
+        try:
+            corr.apply_settings(["Administrator", "localhost"], [["web", "host"]])
+            assert corr.extract_entities({"user": {"name": "administrator"}}).user is None
+            assert corr.ACTIVITY_CHAINS == {"web": frozenset({"host"})}
+            # Valeur mal formée : paramètre courant conservé
+            corr.apply_settings("pas une liste", [["a"]])
+            assert corr.ACTIVITY_CHAINS == {"web": frozenset({"host"})}
+        finally:
+            corr.GENERIC_VALUES, corr.ACTIVITY_CHAINS = saved

@@ -1,5 +1,5 @@
 -- Schéma incidents (C4 4.3, 5.3) — écrivain : service Incidents
-CREATE SCHEMA incidents;
+CREATE SCHEMA IF NOT EXISTS incidents;
 CREATE TYPE incidents.alert_status AS ENUM ('nouvelle', 'en_cours', 'cloturee');
 CREATE TYPE incidents.incident_status AS ENUM ('ouvert', 'en_cours', 'clos');
 CREATE TYPE incidents.entry_type AS ENUM ('event', 'alert', 'status_change', 'comment', 'correlation', 'conflict');

@@ -234,6 +234,12 @@ async def cmd_metrics(a) -> int:
     size = Gauge("baolsec_dlq_bytes", "Taille du flux DLQ en octets")
     oldest = Gauge("baolsec_dlq_oldest_age_seconds", "Âge du plus ancien message de la file de rejet")
     up = Gauge("baolsec_dlq_monitor_up", "1 si la dernière lecture du broker a réussi")
+    # Retard des consommateurs et volume des flux (EF-12 : « retard des consommateurs » dans Grafana)
+    pending = Gauge("baolsec_consumer_pending_messages", "Messages en attente de lecture", ["stream", "consumer"])
+    ack_pending = Gauge("baolsec_consumer_ack_pending_messages", "Messages lus non acquittés", ["stream", "consumer"])
+    redelivered = Gauge("baolsec_consumer_redelivered_messages", "Messages relivrés", ["stream", "consumer"])
+    stream_msgs = Gauge("baolsec_stream_messages", "Messages conservés dans le flux", ["stream"])
+    stream_bytes = Gauge("baolsec_stream_bytes", "Taille du flux en octets", ["stream"])
     start_http_server(a.port)
     print(f"métriques sur :{a.port}/metrics, lecture toutes les {a.interval} s", flush=True)
     while True:
@@ -243,6 +249,17 @@ async def cmd_metrics(a) -> int:
                 js = nc.jetstream()
                 info = await js.stream_info(STREAM)
                 entries = await load(js)
+                for name in ("RAW_EVENTS", "NORMALIZED_EVENTS", "ALERTS", "INCIDENTS", "DLQ"):
+                    try:
+                        sinfo = await js.stream_info(name)
+                    except Exception:
+                        continue
+                    stream_msgs.labels(name).set(sinfo.state.messages)
+                    stream_bytes.labels(name).set(sinfo.state.bytes)
+                    for c in await js.consumers_info(name):
+                        pending.labels(name, c.name).set(c.num_pending or 0)
+                        ack_pending.labels(name, c.name).set(c.num_ack_pending or 0)
+                        redelivered.labels(name, c.name).set(c.num_redelivered or 0)
             finally:
                 await nc.close()
             messages.clear()
